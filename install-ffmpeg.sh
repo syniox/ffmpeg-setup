@@ -14,7 +14,7 @@ threads="2"
 
 if test x"$1" = x"-h" -o x"$1" = x"--help" ; then
 cat <<EOF
-Usage: ./configure [options]
+Usage: ./install-ffmpeg.sh [options]
 Help:
   -h, --help           print this message
   -i                   install dependencies automatically
@@ -29,14 +29,14 @@ check_opt(){
     case "$opt" in 
       i)
         install_dependencies="true"
-		;;
-	  t=*)
-		threads="$optarg"
-		;;
-	  *)
-		echo "Unknown option $opt, stopped."
-		;;
-	esac
+        ;;
+      t=*)
+        threads="$optarg"
+        ;;
+      *)
+        echo "Unknown option $opt, stopped."
+        ;;
+    esac
   done
 }
 
@@ -48,14 +48,14 @@ check_dependencies(){
     "wget"
     "autoconf"
     "automake"
-	"make"
+    "make"
     "mingw-w64-x86_64-pkg-config"
     "mingw-w64-x86_64-make"
     "mingw-w64-x86_64-cmake"
     "mingw-w64-x86_64-gcc"
     "mingw-w64-x86_64-SDL2"
     "mingw-w64-x86_64-nasm"
-	"mingw-w64-x86_64-libtool"
+    "mingw-w64-x86_64-libtool"
   )
   missing_dependencies=""
 
@@ -83,6 +83,7 @@ download_ffmpeg(){
   if [ -f "n4.1.tar.gz" ]; then
     :
   else 
+    echo "Downloading FFmpeg 4.1."
     wget --no-verbose \
       "https://github.com/FFmpeg/FFmpeg/archive/n4.1.tar.gz" \
       || exit 1
@@ -104,6 +105,7 @@ download_resources(){
   if [ -f "last_x264.tar.bz2" ]; then
     :
   else
+    echo "Downloading x264 library."
     wget --no-verbose \
       "ftp://ftp.videolan.org/pub/x264/snapshots/last_x264.tar.bz2" \
 	  || exit 1
@@ -117,18 +119,19 @@ download_resources(){
     x264_dir=$( ls -l | grep '^d' | grep x264 | awk '{ print $9 }' )
   fi
 
-  if [ -f "x265_2.9.tar.gz" ]; then
+  if [ -f "x265_3.0.tar.gz" ]; then
     :
   else
+    echo "Downloading x265 library."
     wget --no-verbose \
-      "http://ftp.videolan.org/pub/videolan/x265/x265_2.9.tar.gz" \
+      "http://ftp.videolan.org/pub/videolan/x265/x265_3.0.tar.gz" \
 	  || exit 1
     echo "Downloaded x265 library."
   fi
   if [ -n "$x265_dir" ]; then
     echo "x265 library exists."
   else 
-    tar -xzf x265_2.9.tar.gz || exit 1
+    tar -xzf x265_3.0.tar.gz || exit 1
     echo "Unpacked x265 library."
     x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
   fi
@@ -136,6 +139,7 @@ download_resources(){
   if [ -f "fdk_aac-v2.0.0.tar.gz" ]; then
     :
   else
+    echo "Downloading fdk-aac library."
     wget --no-verbose -O fdk_aac-v2.0.0.tar.gz \
       "https://github.com/mstorsjo/fdk-aac/archive/v2.0.0.tar.gz" \
       || exit 1
@@ -168,7 +172,7 @@ download_resources(){
 
 
 build_resources(){
-  if [ ! -f "$work_dir/ffmpeg_build/lib/libx264.a" ]; then
+  if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x264.pc" ]; then
     cd $work_dir/ffmpeg_sources/$x264_dir
     sh ./configure \
       --prefix=$work_dir/ffmpeg_build \
@@ -178,9 +182,9 @@ build_resources(){
     mingw32-make -j${threads} && mingw32-make install || exit 1
   fi
 
-  if [ ! -f "$work_dir/ffmpeg_build/lib/libx265.a" ]; then
+  if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x265.pc" ]; then
     cd $work_dir/ffmpeg_sources/$x265_dir/source
-    cmake -G "MSYS Makefiles" \
+    cmake -G "MinGW Makefiles" \
       -DCMAKE_MAKE_PROGRAM=mingw32-make \
       -DENABLE_SHARED=on \
       -DCMAKE_INSTALL_PREFIX="$work_dir/ffmpeg_build" \
@@ -188,7 +192,7 @@ build_resources(){
     mingw32-make -j${threads} && mingw32-make install || exit 1
   fi
 
-  if [ ! -f "$work_dir/ffmpeg_build/bin/libfdk-aac-2.dll" ]; then
+  if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/fdk-aac.pc" ]; then
     cd $work_dir/ffmpeg_sources/$fdkaac_dir
     autoreconf -fi 
     sh ./configure \
@@ -214,18 +218,10 @@ build_ffmpeg(){
     --extra-cflags="-I$work_dir/ffmpeg_build/include" \
     --extra-ldflags="-L$work_dir/ffmpeg_build/lib" \
     --extra-libs="-lpthread -lm" \
-	--libdir="$work_dir/ffmpeg_build/bin" \
+    --libdir="$work_dir/ffmpeg_build/bin" \
     --disable-static \
     --enable-shared \
-    --disable-decoders \
-    --disable-encoders \
     --disable-hwaccels \
-	--disable-dxva2 \
-    --disable-avdevice \
-    --disable-demuxers \
-    --disable-muxers \
-    --disable-protocols \
-    --disable-parsers \
     --disable-filters \
     --disable-network \
     --disable-bsfs \
@@ -233,16 +229,10 @@ build_ffmpeg(){
     --enable-gpl \
     --enable-nonfree \
     --enable-libfdk-aac \
-    --enable-iconv \
     --enable-libx264 \
     --enable-libx265 \
-    --enable-demuxer=aac,ape,ass,avi,concat,flac,flv,gif,h264,hevc \
-    --enable-demuxer=ico,srt,swf,m4v,mp3,ogg,wav \
-    --enable-muxer=avi,flac,flv,gif,h264,hash,hevc,ico \
-    --enable-muxer=m4v,md5,mov,mp3,mp4,ogg,srt,swf,sup,wav,webm \
     --enable-decoder=h264,hevc \
-    --enable-encoder=libx265,libx264 \
-    --enable-protocol=file,concat,pipe 
+    --enable-encoder=libx265,libx264
   mingw32-make -j${threads} && mingw32-make install || exit 1
 }
 
