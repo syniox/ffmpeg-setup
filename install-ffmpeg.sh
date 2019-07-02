@@ -14,7 +14,7 @@ threads="2"
 
 if test x"$1" = x"-h" -o x"$1" = x"--help" ; then
 cat <<EOF
-Usage: ./install-ffmpeg.sh [options]
+Usage: $0 [options]
 Help:
   -h, --help           print this message
   -i                   install dependencies automatically
@@ -23,22 +23,21 @@ EOF
 exit 1
 fi
 
-check_opt(){
-  for opt do
-    optarg="${opt#*=}"
-    case "$opt" in 
-      i)
-        install_dependencies="true"
-        ;;
-      t=*)
-        threads="$optarg"
-        ;;
-      *)
-        echo "Unknown option $opt, stopped."
-        ;;
-    esac
-  done
-}
+for opt do
+  optarg="${opt#*=}"
+  case "$opt" in 
+    -i)
+      install_dependencies="true"
+      ;;
+    -t=*)
+      threads="$optarg"
+      ;;
+    *)
+      echo "Unknown option $opt, stopped."
+      ;;
+  esac
+done
+echo "threads: ${threads}"
 
 check_dependencies(){
   dependency_list=(
@@ -108,7 +107,7 @@ download_resources(){
     echo "Downloading x264 library."
     wget --no-verbose \
       "ftp://ftp.videolan.org/pub/x264/snapshots/last_x264.tar.bz2" \
-	  || exit 1
+      || exit 1
     echo "Downloaded x264 library."
   fi
   if [ -n "$x264_dir" ]; then
@@ -125,7 +124,7 @@ download_resources(){
     echo "Downloading x265 library."
     wget --no-verbose \
       "http://ftp.videolan.org/pub/videolan/x265/x265_3.0.tar.gz" \
-	  || exit 1
+      || exit 1
     echo "Downloaded x265 library."
   fi
   if [ -n "$x265_dir" ]; then
@@ -212,32 +211,30 @@ build_resources(){
 build_ffmpeg(){
   cd $work_dir/$ffmpeg_dir
   PKG_CONFIG_PATH="$work_dir/ffmpeg_build/lib/pkgconfig/" \
+  CFLAGS="-I$work_dir/ffmpeg_build/include" \
+  LDFLAGS="-L$work_dir/ffmpeg_build/lib" \
+  LIBS="-lpthread -lm -lgcc" \
   sh ./configure \
     --prefix="$work_dir/ffmpeg_build" \
     --pkg-config-flags="--static" \
-    --extra-cflags="-I$work_dir/ffmpeg_build/include" \
-    --extra-ldflags="-L$work_dir/ffmpeg_build/lib" \
-    --extra-libs="-lpthread -lm" \
     --libdir="$work_dir/ffmpeg_build/bin" \
-    --disable-static \
-    --enable-shared \
     --disable-hwaccels \
     --disable-filters \
-    --disable-network \
+    --enable-filter=aresample,resample,resize,psnr,subtitles,scale \
     --disable-bsfs \
-    --enable-filter=subtitles,scale \
     --enable-gpl \
     --enable-nonfree \
     --enable-libfdk-aac \
-    --enable-libx264 \
     --enable-libx265 \
-    --enable-decoder=h264,hevc \
-    --enable-encoder=libx265,libx264
+    --disable-decoders \
+    --disable-encoders \
+    --enable-decoder=aac,h264,hevc,mjpeg,mp3,yuv4 \
+    --enable-encoder=libx265,libfdk_aac,mjpeg,wrapped_avframe \
+  || exit 1
   mingw32-make -j${threads} && mingw32-make install || exit 1
 }
 
 
-check_opt || exit 1
 check_dependencies || exit 1
 download_ffmpeg || exit 1
 download_resources || exit 1
