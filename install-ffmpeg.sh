@@ -9,8 +9,14 @@ x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
 fdkaac_dir=$( ls -l | grep '^d' | grep fdk | awk '{ print $9 }' )
 # libass_dir=$( ls -l | grep '^d' | grep ass | awk '{ print $9 }' )
 install_dependencies=""
+static_lib=0
 threads="2"
 
+if [[ `uname` == Linux ]]; then
+	make_program=make
+else
+	make_program=mingw32-make
+fi
 
 if test x"$1" = x"-h" -o x"$1" = x"--help" ; then
 cat <<EOF
@@ -19,6 +25,7 @@ Help:
   -h, --help           print this message
   -i                   install dependencies automatically
   -t=<int>(default:2)  set the number of threads in compilation
+  -x                   build static library(default: shared)
 EOF
 exit 1
 fi
@@ -32,8 +39,12 @@ for opt do
     -t=*)
       threads="$optarg"
       ;;
+    -x)
+      static_lib=1
+      ;;
     *)
       echo "Unknown option $opt, stopped."
+      exit 1
       ;;
   esac
 done
@@ -79,19 +90,19 @@ check_dependencies(){
 
 download_ffmpeg(){
   cd $work_dir
-  if [ -f "n4.1.tar.gz" ]; then
+  if [ -f "n4.1.3.tar.gz" ]; then
     :
   else 
-    echo "Downloading FFmpeg 4.1."
+    echo "Downloading FFmpeg 4.1.3"
     wget --no-verbose \
-      "https://github.com/FFmpeg/FFmpeg/archive/n4.1.tar.gz" \
+      "https://github.com/FFmpeg/FFmpeg/archive/n4.1.3.tar.gz" \
       || exit 1
-    echo "Downloaded FFmpeg 4.1."
+    echo "Downloaded FFmpeg 4.1.3"
   fi
   if [ -n "$ffmpeg_dir" ]; then
     echo "FFmpeg exists."
   else
-    tar -xzf n4.1.tar.gz || exit 1
+    tar -xzf n4.1.3.tar.gz || exit 1
     echo "Unpacked FFmpeg."
     ffmpeg_dir=$( ls -l | grep '^d' | grep FF | awk '{ print $9 }' )
   fi
@@ -106,7 +117,7 @@ download_resources(){
   else
     echo "Downloading x264 library."
     wget --no-verbose \
-      "ftp://ftp.videolan.org/pub/x264/snapshots/last_x264.tar.bz2" \
+      "http://ftp.videolan.org/pub/x264/snapshots/last_x264.tar.bz2" \
       || exit 1
     echo "Downloaded x264 library."
   fi
@@ -173,31 +184,55 @@ download_resources(){
 build_resources(){
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x264.pc" ]; then
     cd $work_dir/ffmpeg_sources/$x264_dir
-    sh ./configure \
-      --prefix=$work_dir/ffmpeg_build \
-      --enable-shared \
-      --enable-pic \
-      --enable-lto || exit 1
-    mingw32-make -j${threads} && mingw32-make install || exit 1
+    if [[ $static_lib == 1 ]]; then
+      ./configure \
+        --prefix=$work_dir/ffmpeg_build \
+        --disable-avs \
+        --enable-static \
+        --enable-pic \
+        --enable-lto || exit 1
+    else
+      ./configure \
+        --prefix=$work_dir/ffmpeg_build \
+        --disable-avs \
+        --enable-shared \
+        --enable-pic \
+        --enable-lto || exit 1
+    fi
+    ${make_program} -j${threads} && ${make_program} install || exit 1
   fi
 
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x265.pc" ]; then
     cd $work_dir/ffmpeg_sources/$x265_dir/source
-    cmake -G "MinGW Makefiles" \
-      -DCMAKE_MAKE_PROGRAM=mingw32-make \
-      -DENABLE_SHARED=on \
-      -DCMAKE_INSTALL_PREFIX="$work_dir/ffmpeg_build" \
-      . || exit 1
-    mingw32-make -j${threads} && mingw32-make install || exit 1
+    if [[ $static_lib == 1 ]]; then
+      cmake -G "Unix Makefiles" \
+        -DCMAKE_MAKE_PROGRAM=${make_program} \
+        -DENABLE_SHARED=0 \
+        -DCMAKE_INSTALL_PREFIX="$work_dir/ffmpeg_build" \
+        . || exit 1
+    else
+      cmake -G "Unix Makefiles" \
+        -DCMAKE_MAKE_PROGRAM=${make_program} \
+        -DENABLE_SHARED=1 \
+        -DCMAKE_INSTALL_PREFIX="$work_dir/ffmpeg_build" \
+        . || exit 1
+    fi
+    ${make_program} -j${threads} && ${make_program} install || exit 1
   fi
 
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/fdk-aac.pc" ]; then
     cd $work_dir/ffmpeg_sources/$fdkaac_dir
     autoreconf -fi 
-    sh ./configure \
-      --prefix=$work_dir/ffmpeg_build \
-      --enable-shared || exit 1
-    mingw32-make -j${threads} && mingw32-make install || exit 1
+    if [[ $static_lib == 1 ]]; then
+      ./configure \
+        --prefix=$work_dir/ffmpeg_build \
+        --disable-shared || exit 1
+    else
+      ./configure \
+        --prefix=$work_dir/ffmpeg_build \
+        --enable-shared || exit 1
+    fi
+    ${make_program} -j${threads} && ${make_program} install || exit 1
   fi
 
 #  cd $work_dir/ffmpeg_sources/$libass_dir
@@ -210,11 +245,7 @@ build_resources(){
 
 build_ffmpeg(){
   cd $work_dir/$ffmpeg_dir
-  PKG_CONFIG_PATH="$work_dir/ffmpeg_build/lib/pkgconfig/" \
-  CFLAGS="-I$work_dir/ffmpeg_build/include" \
-  LDFLAGS="-L$work_dir/ffmpeg_build/lib" \
-  LIBS="-lpthread -lm -lgcc" \
-  sh ./configure \
+  BUILD_OPT="
     --prefix="$work_dir/ffmpeg_build" \
     --pkg-config-flags="--static" \
     --libdir="$work_dir/ffmpeg_build/bin" \
@@ -225,17 +256,28 @@ build_ffmpeg(){
     --enable-gpl \
     --enable-nonfree \
     --enable-libfdk-aac \
+    --enable-libx264 \
     --enable-libx265 \
     --disable-decoders \
     --disable-encoders \
-    --enable-decoder=aac,h264,hevc,mjpeg,mp3,yuv4 \
-    --enable-encoder=libx265,libfdk_aac,mjpeg,wrapped_avframe \
-  || exit 1
-  mingw32-make -j${threads} && mingw32-make install || exit 1
+    --enable-decoder=aac,h264,hevc,mjpeg,mp3,opus,vp9,yuv4 \
+    --enable-encoder=libx264,libx265,libfdk_aac,mjpeg,wrapped_avframe
+  "
+  if [[ $static_lib == 1 ]]; then
+    BUILD_OPT="${BUILD_OPT} --disable-shared --enable-static"
+  fi
+  PKG_CONFIG_PATH="$work_dir/ffmpeg_build/lib/pkgconfig/" \
+  CFLAGS="-I$work_dir/ffmpeg_build/include" \
+  LDFLAGS="-L$work_dir/ffmpeg_build/lib" \
+  LIBS="-lpthread -lm -lgcc" \
+  sh ./configure ${BUILD_OPT} || exit 1
+  ${make_program} -j${threads} && ${make_program} install || exit 1
 }
 
 
-check_dependencies || exit 1
+if [[ `uname` != Linux ]]; then 
+  check_dependencies || exit 1
+fi
 download_ffmpeg || exit 1
 download_resources || exit 1
 build_resources || exit 1
