@@ -1,0 +1,8 @@
+# output dir
+*/
+
+# ffmpeg file
+*.tar.gz
+
+# temp files
+*.swp
