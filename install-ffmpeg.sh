@@ -1,3 +1,5 @@
+#!/bin/bash
+
 current_dir=$( pwd )
 work_dir=$(cd $(dirname $0); pwd)
 cd $work_dir
@@ -10,12 +12,30 @@ fdkaac_dir=$( ls -l | grep '^d' | grep fdk | awk '{ print $9 }' )
 # libass_dir=$( ls -l | grep '^d' | grep ass | awk '{ print $9 }' )
 install_dependencies=""
 static_lib=0
+enable_x264=0
+enable_x265=0
+enable_fdkaac=0
 threads="2"
+BUILD_OPT="
+  --prefix="$work_dir/ffmpeg_build" \
+  --pkg-config-flags="--static" \
+  --libdir="$work_dir/ffmpeg_build/bin" \
+  --disable-hwaccels \
+  --disable-filters \
+  --enable-filter=aresample,resample,resize,psnr,subtitles,scale \
+  --disable-bsfs \
+  --enable-gpl \
+  --enable-nonfree \
+  --disable-decoders \
+  --disable-encoders \
+  --enable-decoder=aac,h264,hevc,mjpeg,mp3,opus,vp9,yuv4 \
+  --enable-encoder=libx264,libx265,libfdk_aac,mjpeg,wrapped_avframe
+"
 
 if [[ `uname` == Linux ]]; then
-	make_program=make
+  make_program=make
 else
-	make_program=mingw32-make
+  make_program=mingw32-make
 fi
 
 if test x"$1" = x"-h" -o x"$1" = x"--help" ; then
@@ -26,6 +46,9 @@ Help:
   -i                   install dependencies automatically
   -t=<int>(default:2)  set the number of threads in compilation
   -x                   build static library(default: shared)
+  --enable-libx264     include x264 library(default disabled)
+  --enable-libx265     include x265 library(default disabled)
+  --enable-libfdkaac   include fdkaac library(default disabled)
 EOF
 exit 1
 fi
@@ -41,6 +64,18 @@ for opt do
       ;;
     -x)
       static_lib=1
+      ;;
+    --enable-libx264)
+      echo "x264 enabled."
+      BUILD_OPT="${BUILD_OPT} --enable-libx264"
+      ;;
+    --enable-libx265)
+      echo "x265 enabled."
+      BUILD_OPT="${BUILD_OPT} --enable-libx265"
+      ;;
+    --enable-libfdkaac)
+      echo "fdkaac enabled."
+      BUILD_OPT="${BUILD_OPT} --enable-libfdk-aac"
       ;;
     *)
       echo "Unknown option $opt, stopped."
@@ -58,7 +93,6 @@ check_dependencies(){
     "wget"
     "autoconf"
     "automake"
-    "make"
     "mingw-w64-x86_64-pkg-config"
     "mingw-w64-x86_64-make"
     "mingw-w64-x86_64-cmake"
@@ -90,27 +124,28 @@ check_dependencies(){
 
 download_ffmpeg(){
   cd $work_dir
-  if [ -f "n4.1.3.tar.gz" ]; then
+  if [ -f "n4.1.4.tar.gz" ]; then
     :
   else 
-    echo "Downloading FFmpeg 4.1.3"
+    echo "Downloading FFmpeg 4.1.4"
     wget --no-verbose \
-      "https://github.com/FFmpeg/FFmpeg/archive/n4.1.3.tar.gz" \
+      "https://github.com/FFmpeg/FFmpeg/archive/n4.1.4.tar.gz" \
       || exit 1
-    echo "Downloaded FFmpeg 4.1.3"
+    echo "Downloaded FFmpeg 4.1.4"
   fi
   if [ -n "$ffmpeg_dir" ]; then
     echo "FFmpeg exists."
   else
-    tar -xzf n4.1.3.tar.gz || exit 1
+    tar -xzf n4.1.4.tar.gz || exit 1
     echo "Unpacked FFmpeg."
     ffmpeg_dir=$( ls -l | grep '^d' | grep FF | awk '{ print $9 }' )
   fi
 }
 
-
-download_resources(){
-  cd $work_dir/ffmpeg_sources
+build_x264(){
+  cd $work_dir
+  mkdir -p ffmpeg_sources
+  cd ffmpeg_sources
 
   if [ -f "last_x264.tar.bz2" ]; then
     :
@@ -129,59 +164,6 @@ download_resources(){
     x264_dir=$( ls -l | grep '^d' | grep x264 | awk '{ print $9 }' )
   fi
 
-  if [ -f "x265_3.0.tar.gz" ]; then
-    :
-  else
-    echo "Downloading x265 library."
-    wget --no-verbose \
-      "http://ftp.videolan.org/pub/videolan/x265/x265_3.0.tar.gz" \
-      || exit 1
-    echo "Downloaded x265 library."
-  fi
-  if [ -n "$x265_dir" ]; then
-    echo "x265 library exists."
-  else 
-    tar -xzf x265_3.0.tar.gz || exit 1
-    echo "Unpacked x265 library."
-    x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
-  fi
-
-  if [ -f "fdk_aac-v2.0.0.tar.gz" ]; then
-    :
-  else
-    echo "Downloading fdk-aac library."
-    wget --no-verbose -O fdk_aac-v2.0.0.tar.gz \
-      "https://github.com/mstorsjo/fdk-aac/archive/v2.0.0.tar.gz" \
-      || exit 1
-    echo "Downloaded fdk-aac library."
-  fi
-  if [ -n "$fdkaac_dir" ]; then
-    echo "fdkaac library exists."
-  else
-    tar -xzf fdk_aac-v2.0.0.tar.gz || exit 1
-    echo "Unpacked fdkaac library."
-    fdkaac_dir=$( ls -l | grep '^d' | grep fdk | awk '{ print $9 }' )
-  fi
-
-#  if [[ -f libass-0.14.0.tar.xz ]]; then
-#    :
-#  else
-#    echo "Downloading ass library..."
-#	wget --no-verbose \
-#    "https://github.com/libass/libass/releases/download/0.14.0/libass-0.14.0.tar.xz" \
-#	|| exit 1
-#  fi
-#  if [[ -n "$libass_dir" ]]; then
-#    echo "ass library exists."
-#  else
-#	echo "Unpacking ass library..."
-#	tar -xJf libass-0.14.0.tar.xz || exit 1
-#	libass_dir=$( ls -l | grep '^d' | grep ass | awk '{ print $9 }' )
-#  fi
-}
-
-
-build_resources(){
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x264.pc" ]; then
     cd $work_dir/ffmpeg_sources/$x264_dir
     if [[ $static_lib == 1 ]]; then
@@ -201,6 +183,29 @@ build_resources(){
     fi
     ${make_program} -j${threads} && ${make_program} install || exit 1
   fi
+}
+
+build_x265(){
+  cd $work_dir
+  mkdir -p ffmpeg_sources
+  cd ffmpeg_sources
+
+  if [ -f "x265_3.0.tar.gz" ]; then
+    :
+  else
+    echo "Downloading x265 library."
+    wget --no-verbose \
+      "http://ftp.videolan.org/pub/videolan/x265/x265_3.0.tar.gz" \
+      || exit 1
+    echo "Downloaded x265 library."
+  fi
+  if [ -n "$x265_dir" ]; then
+    echo "x265 library exists."
+  else 
+    tar -xzf x265_3.0.tar.gz || exit 1
+    echo "Unpacked x265 library."
+    x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
+  fi
 
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x265.pc" ]; then
     cd $work_dir/ffmpeg_sources/$x265_dir/source
@@ -209,15 +214,42 @@ build_resources(){
         -DCMAKE_MAKE_PROGRAM=${make_program} \
         -DENABLE_SHARED=0 \
         -DCMAKE_INSTALL_PREFIX="$work_dir/ffmpeg_build" \
+        -DCMAKE_C_COMPILER=gcc \
+        -DCMAKE_CXX_COMPILER=g++ \
         . || exit 1
     else
       cmake -G "Unix Makefiles" \
         -DCMAKE_MAKE_PROGRAM=${make_program} \
         -DENABLE_SHARED=1 \
         -DCMAKE_INSTALL_PREFIX="$work_dir/ffmpeg_build" \
+        -DCMAKE_C_COMPILER=gcc \
+        -DCMAKE_CXX_COMPILER=g++ \
         . || exit 1
     fi
     ${make_program} -j${threads} && ${make_program} install || exit 1
+  fi
+}
+
+build_fdkaac(){
+  cd $work_dir
+  mkdir -p ffmpeg_sources
+  cd ffmpeg_sources
+
+  if [ -f "fdk_aac-v2.0.0.tar.gz" ]; then
+    :
+  else
+    echo "Downloading fdk-aac library."
+    wget --no-verbose -O fdk_aac-v2.0.0.tar.gz \
+      "https://github.com/mstorsjo/fdk-aac/archive/v2.0.0.tar.gz" \
+      || exit 1
+    echo "Downloaded fdk-aac library."
+  fi
+  if [ -n "$fdkaac_dir" ]; then
+    echo "fdkaac library exists."
+  else
+    tar -xzf fdk_aac-v2.0.0.tar.gz || exit 1
+    echo "Unpacked fdkaac library."
+    fdkaac_dir=$( ls -l | grep '^d' | grep fdk | awk '{ print $9 }' )
   fi
 
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/fdk-aac.pc" ]; then
@@ -234,35 +266,10 @@ build_resources(){
     fi
     ${make_program} -j${threads} && ${make_program} install || exit 1
   fi
-
-#  cd $work_dir/ffmpeg_sources/$libass_dir
-#  autoreconf -fiv
-#  sh ./configure \
-#    --prefix=$work_dir/ffmpeg_build \
-#	--enable-shared=no || exit 1
-#  make -j2 && make install || exit 1
 }
 
 build_ffmpeg(){
   cd $work_dir/$ffmpeg_dir
-  BUILD_OPT="
-    --prefix="$work_dir/ffmpeg_build" \
-    --pkg-config-flags="--static" \
-    --libdir="$work_dir/ffmpeg_build/bin" \
-    --disable-hwaccels \
-    --disable-filters \
-    --enable-filter=aresample,resample,resize,psnr,subtitles,scale \
-    --disable-bsfs \
-    --enable-gpl \
-    --enable-nonfree \
-    --enable-libfdk-aac \
-    --enable-libx264 \
-    --enable-libx265 \
-    --disable-decoders \
-    --disable-encoders \
-    --enable-decoder=aac,h264,hevc,mjpeg,mp3,opus,vp9,yuv4 \
-    --enable-encoder=libx264,libx265,libfdk_aac,mjpeg,wrapped_avframe
-  "
   if [[ $static_lib == 1 ]]; then
     BUILD_OPT="${BUILD_OPT} --disable-shared --enable-static"
   fi
@@ -279,8 +286,17 @@ if [[ `uname` != Linux ]]; then
   check_dependencies || exit 1
 fi
 download_ffmpeg || exit 1
-download_resources || exit 1
-build_resources || exit 1
+
+if [[ $enable_x264 == 1 ]]; then
+  build_x264 || exit 1
+fi
+if [[ $enable_x265 == 1 ]]; then
+  build_x264 || exit 1
+fi
+if [[ $enable_fdkaac == 1 ]]; then
+  build_fdkaac || exit 1
+fi
+
 build_ffmpeg || exit 1
 
 cd $current_dir
