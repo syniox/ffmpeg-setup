@@ -1,8 +1,8 @@
-### ffmpeg-msys2-setup
-
-**It's broken at the moment.**
+### ffmpeg-setup
 
 A script to download and compile ffmpeg for personal use.
+Only static build is available at the moment.
+Tested under msys2.
 
 Dependencies:
 

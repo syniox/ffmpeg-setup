@@ -4,7 +4,7 @@ current_dir=$( pwd )
 work_dir=$(cd $(dirname $0); pwd)
 cd $work_dir
 ffmpeg_dir=$( ls -l | grep '^d' | grep FF | awk '{ print $9 }' )
-cd $work_dir && mkdir ffmpeg_sources > /dev/null 2>&1
+cd $work_dir && mkdir -p ffmpeg_sources
 cd ffmpeg_sources
 x264_dir=$( ls -l | grep '^d' | grep x264 | awk '{ print $9 }' )
 x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
@@ -22,21 +22,23 @@ BUILD_OPT="
   --libdir="$work_dir/ffmpeg_build/bin" \
   --disable-hwaccels \
   --disable-filters \
-  --enable-filter=aresample,resample,resize,psnr,subtitles,scale \
+  --enable-filter=aresample,resample,resize,psnr,ssim,subtitles,scale \
   --disable-bsfs \
   --enable-gpl \
   --enable-nonfree \
   --disable-decoders \
   --disable-encoders \
-  --enable-decoder=aac,h264,hevc,mjpeg,mp3,opus,vp9,yuv4 \
+  --enable-decoder=aac,flac,h264,hevc,mjpeg,mp3,opus,vp9,yuv4 \
   --enable-encoder=libx264,libx265,libfdk_aac,mjpeg,wrapped_avframe
 "
 
-if [[ `uname` == Linux ]]; then
-  make_program=make
-else
-  make_program=mingw32-make
-fi
+# some problems occured when compiling with mingw32-make, use make for msys2 at the moment
+make_program=make
+# if [[ `uname` == Linux ]]; then
+#   make_program=make
+# else
+#   make_program=mingw32-make
+# fi
 
 if test x"$1" = x"-h" -o x"$1" = x"--help" ; then
 cat <<EOF
@@ -68,14 +70,17 @@ for opt do
     --enable-libx264)
       echo "x264 enabled."
       BUILD_OPT="${BUILD_OPT} --enable-libx264"
+      enable_x264=1
       ;;
     --enable-libx265)
       echo "x265 enabled."
       BUILD_OPT="${BUILD_OPT} --enable-libx265"
+      enable_x265=1
       ;;
     --enable-libfdkaac)
       echo "fdkaac enabled."
       BUILD_OPT="${BUILD_OPT} --enable-libfdk-aac"
+      enable_fdkaac=1
       ;;
     *)
       echo "Unknown option $opt, stopped."
@@ -84,6 +89,7 @@ for opt do
   esac
 done
 echo "threads: ${threads}"
+echo "Make Program: ${make_program}"
 
 check_dependencies(){
   dependency_list=(
@@ -93,6 +99,7 @@ check_dependencies(){
     "wget"
     "autoconf"
     "automake"
+    "make"
     "mingw-w64-x86_64-pkg-config"
     "mingw-w64-x86_64-make"
     "mingw-w64-x86_64-cmake"
@@ -128,7 +135,7 @@ download_ffmpeg(){
     :
   else 
     echo "Downloading FFmpeg 4.1.4"
-    wget --no-verbose \
+    wget \
       "https://github.com/FFmpeg/FFmpeg/archive/n4.1.4.tar.gz" \
       || exit 1
     echo "Downloaded FFmpeg 4.1.4"
@@ -143,15 +150,13 @@ download_ffmpeg(){
 }
 
 build_x264(){
-  cd $work_dir
-  mkdir -p ffmpeg_sources
-  cd ffmpeg_sources
+  cd $work_dir/ffmpeg_sources
 
   if [ -f "last_x264.tar.bz2" ]; then
     :
   else
     echo "Downloading x264 library."
-    wget --no-verbose \
+    wget \
       "http://ftp.videolan.org/pub/x264/snapshots/last_x264.tar.bz2" \
       || exit 1
     echo "Downloaded x264 library."
@@ -170,6 +175,7 @@ build_x264(){
       ./configure \
         --prefix=$work_dir/ffmpeg_build \
         --disable-avs \
+        --disable-opencl \
         --enable-static \
         --enable-pic \
         --enable-lto || exit 1
@@ -177,6 +183,7 @@ build_x264(){
       ./configure \
         --prefix=$work_dir/ffmpeg_build \
         --disable-avs \
+        --disable-opencl \
         --enable-shared \
         --enable-pic \
         --enable-lto || exit 1
@@ -186,15 +193,13 @@ build_x264(){
 }
 
 build_x265(){
-  cd $work_dir
-  mkdir -p ffmpeg_sources
-  cd ffmpeg_sources
+  cd $work_dir/ffmpeg_sources
 
   if [ -f "x265_3.0.tar.gz" ]; then
     :
   else
     echo "Downloading x265 library."
-    wget --no-verbose \
+    wget \
       "http://ftp.videolan.org/pub/videolan/x265/x265_3.0.tar.gz" \
       || exit 1
     echo "Downloaded x265 library."
@@ -239,7 +244,7 @@ build_fdkaac(){
     :
   else
     echo "Downloading fdk-aac library."
-    wget --no-verbose -O fdk_aac-v2.0.0.tar.gz \
+    wget -O fdk_aac-v2.0.0.tar.gz \
       "https://github.com/mstorsjo/fdk-aac/archive/v2.0.0.tar.gz" \
       || exit 1
     echo "Downloaded fdk-aac library."
@@ -258,11 +263,11 @@ build_fdkaac(){
     if [[ $static_lib == 1 ]]; then
       ./configure \
         --prefix=$work_dir/ffmpeg_build \
-        --disable-shared || exit 1
+        --enable-shared=no || exit 1
     else
       ./configure \
         --prefix=$work_dir/ffmpeg_build \
-        --enable-shared || exit 1
+        || exit 1
     fi
     ${make_program} -j${threads} && ${make_program} install || exit 1
   fi
@@ -282,16 +287,16 @@ build_ffmpeg(){
 }
 
 
-if [[ `uname` != Linux ]]; then 
-  check_dependencies || exit 1
-fi
+# if [[ `uname` != Linux ]]; then 
+#  check_dependencies || exit 1
+# fi
 download_ffmpeg || exit 1
 
 if [[ $enable_x264 == 1 ]]; then
   build_x264 || exit 1
 fi
 if [[ $enable_x265 == 1 ]]; then
-  build_x264 || exit 1
+  build_x265 || exit 1
 fi
 if [[ $enable_fdkaac == 1 ]]; then
   build_fdkaac || exit 1
