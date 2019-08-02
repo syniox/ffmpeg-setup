@@ -24,12 +24,15 @@ BUILD_OPT="
   --disable-filters \
   --enable-filter=aresample,resample,resize,psnr,ssim,subtitles,scale \
   --disable-bsfs \
+  --disable-muxers \
+  --enable-muxer=flac,h264,hevc,ico,matroska,mjpeg \
+  --enable-muxer=mp4,null,rawvideo,wav,yuv4mpegpipe \
   --enable-gpl \
   --enable-nonfree \
   --disable-decoders \
   --disable-encoders \
-  --enable-decoder=aac,flac,h264,hevc,mjpeg,mp3,opus,vp9,yuv4 \
-  --enable-encoder=libx264,libx265,libfdk_aac,mjpeg,wrapped_avframe
+  --enable-decoder=aac,flac,h264,hevc,mjpeg,mp3,opus,png,rawvideo,vp9,yuv4 \
+  --enable-encoder=aac,libx264,libx265,libfdk_aac,mjpeg,rawvideo,wrapped_avframe
 "
 
 # some problems occured when compiling with mingw32-make, use make for msys2 at the moment
@@ -171,23 +174,13 @@ build_x264(){
 
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x264.pc" ]; then
     cd $work_dir/ffmpeg_sources/$x264_dir
-    if [[ $static_lib == 1 ]]; then
-      ./configure \
-        --prefix=$work_dir/ffmpeg_build \
-        --disable-avs \
-        --disable-opencl \
-        --enable-static \
-        --enable-pic \
-        --enable-lto || exit 1
-    else
-      ./configure \
-        --prefix=$work_dir/ffmpeg_build \
-        --disable-avs \
-        --disable-opencl \
-        --enable-shared \
-        --enable-pic \
-        --enable-lto || exit 1
-    fi
+    ./configure \
+      --prefix=$work_dir/ffmpeg_build \
+      --disable-avs \
+      --disable-opencl \
+      --enable-static \
+      --enable-pic \
+      --enable-lto || exit 1
     ${make_program} -j${threads} && ${make_program} install || exit 1
   fi
 }
@@ -214,23 +207,13 @@ build_x265(){
 
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x265.pc" ]; then
     cd $work_dir/ffmpeg_sources/$x265_dir/source
-    if [[ $static_lib == 1 ]]; then
-      cmake -G "Unix Makefiles" \
-        -DCMAKE_MAKE_PROGRAM=${make_program} \
-        -DENABLE_SHARED=0 \
-        -DCMAKE_INSTALL_PREFIX="$work_dir/ffmpeg_build" \
-        -DCMAKE_C_COMPILER=gcc \
-        -DCMAKE_CXX_COMPILER=g++ \
-        . || exit 1
-    else
-      cmake -G "Unix Makefiles" \
-        -DCMAKE_MAKE_PROGRAM=${make_program} \
-        -DENABLE_SHARED=1 \
-        -DCMAKE_INSTALL_PREFIX="$work_dir/ffmpeg_build" \
-        -DCMAKE_C_COMPILER=gcc \
-        -DCMAKE_CXX_COMPILER=g++ \
-        . || exit 1
-    fi
+    cmake -G "Unix Makefiles" \
+      -DCMAKE_MAKE_PROGRAM=${make_program} \
+      -DENABLE_SHARED=0 \
+      -DCMAKE_INSTALL_PREFIX="$work_dir/ffmpeg_build" \
+      -DCMAKE_C_COMPILER=gcc \
+      -DCMAKE_CXX_COMPILER=g++ \
+      . || exit 1
     ${make_program} -j${threads} && ${make_program} install || exit 1
   fi
 }
@@ -260,15 +243,10 @@ build_fdkaac(){
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/fdk-aac.pc" ]; then
     cd $work_dir/ffmpeg_sources/$fdkaac_dir
     autoreconf -fi 
-    if [[ $static_lib == 1 ]]; then
-      ./configure \
-        --prefix=$work_dir/ffmpeg_build \
-        --enable-shared=no || exit 1
-    else
-      ./configure \
-        --prefix=$work_dir/ffmpeg_build \
-        || exit 1
-    fi
+    ./configure \
+      --prefix=$work_dir/ffmpeg_build \
+      --with-pic=yes \
+      --enable-shared=no || exit 1
     ${make_program} -j${threads} && ${make_program} install || exit 1
   fi
 }
@@ -277,6 +255,8 @@ build_ffmpeg(){
   cd $work_dir/$ffmpeg_dir
   if [[ $static_lib == 1 ]]; then
     BUILD_OPT="${BUILD_OPT} --disable-shared --enable-static"
+  else
+    BUILD_OPT="${BUILD_OPT} --enable-shared --disable-static"
   fi
   PKG_CONFIG_PATH="$work_dir/ffmpeg_build/lib/pkgconfig/" \
   CFLAGS="-I$work_dir/ffmpeg_build/include" \
