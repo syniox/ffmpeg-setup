@@ -1,0 +1,10 @@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name:dav1d 
+Description: dav1d
+Version: 0.4.0
+Libs: -L${libdir} -ldav1d -lpthread
+Libs.private: 
+Cflags: -I${includedir}

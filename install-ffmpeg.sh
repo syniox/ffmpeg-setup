@@ -8,13 +8,11 @@ cd $work_dir && mkdir -p ffmpeg_sources
 cd ffmpeg_sources
 x264_dir=$( ls -l | grep '^d' | grep x264 | awk '{ print $9 }' )
 x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
+dav1d_dir=$( ls -l | grep '^d' | grep dav1d | awk '{ print $9 }' )
 fdkaac_dir=$( ls -l | grep '^d' | grep fdk | awk '{ print $9 }' )
 # libass_dir=$( ls -l | grep '^d' | grep ass | awk '{ print $9 }' )
 install_dependencies=""
 static_lib=0
-enable_x264=0
-enable_x265=0
-enable_fdkaac=0
 threads="2"
 BUILD_OPT="
   --prefix="$work_dir/ffmpeg_build" \
@@ -31,7 +29,7 @@ BUILD_OPT="
   --enable-nonfree \
   --disable-decoders \
   --disable-encoders \
-  --enable-decoder=aac,flac,h264,hevc,mjpeg,mp3,opus,png,rawvideo,vp9,yuv4 \
+  --enable-decoder=aac,flac,h264,hevc,libdav1d,mjpeg,mp3,opus,png,rawvideo,vp9,yuv4 \
   --enable-encoder=aac,libx264,libx265,libfdk_aac,mjpeg,rawvideo,wrapped_avframe
 "
 
@@ -53,6 +51,7 @@ Help:
   -x                   build static library(default: shared)
   --enable-libx264     include x264 library(default disabled)
   --enable-libx265     include x265 library(default disabled)
+  --enable-libdav1d    include dav1d library(default disabled)
   --enable-libfdkaac   include fdkaac library(default disabled)
 EOF
 exit 1
@@ -80,6 +79,11 @@ for opt do
       BUILD_OPT="${BUILD_OPT} --enable-libx265"
       enable_x265=1
       ;;
+    --enable-libdav1d)
+      echo "dav1d enabled."
+      BUILD_OPT="${BUILD_OPT} --enable-libdav1d"
+      enable_dav1d=1
+      ;;
     --enable-libfdkaac)
       echo "fdkaac enabled."
       BUILD_OPT="${BUILD_OPT} --enable-libfdk-aac"
@@ -87,6 +91,7 @@ for opt do
       ;;
     *)
       echo "Unknown option $opt, stopped."
+      echo "Run $0 -h for help."
       exit 1
       ;;
   esac
@@ -134,19 +139,19 @@ check_dependencies(){
 
 download_ffmpeg(){
   cd $work_dir
-  if [ -f "n4.1.4.tar.gz" ]; then
+  if [ -f "n4.2.tar.gz" ]; then
     :
   else 
-    echo "Downloading FFmpeg 4.1.4"
+    echo "Downloading FFmpeg 4.2"
     wget \
-      "https://github.com/FFmpeg/FFmpeg/archive/n4.1.4.tar.gz" \
+      "https://github.com/FFmpeg/FFmpeg/archive/n4.2.tar.gz" \
       || exit 1
-    echo "Downloaded FFmpeg 4.1.4"
+    echo "Downloaded FFmpeg 4.2"
   fi
   if [ -n "$ffmpeg_dir" ]; then
     echo "FFmpeg exists."
   else
-    tar -xzf n4.1.4.tar.gz || exit 1
+    tar -xzf n4.2.tar.gz || exit 1
     echo "Unpacked FFmpeg."
     ffmpeg_dir=$( ls -l | grep '^d' | grep FF | awk '{ print $9 }' )
   fi
@@ -218,10 +223,50 @@ build_x265(){
   fi
 }
 
-build_fdkaac(){
+build_dav1d(){
+  mkdir -p $work_dir/ffmpeg_build
+  mkdir -p $work_dir/ffmpeg_build/lib
+  mkdir -p $work_dir/ffmpeg_build/lib/pkgconfig
+
+  cd $work_dir/ffmpeg_sources
+  if [ -f "dav1d-0.4.0.tar.gz" ]; then
+    :
+  else
+    echo "Downloading fdk-aac library."
+    wget -O dav1d-0.4.0.tar.gz \
+      "https://github.com/videolan/dav1d/archive/0.4.0.tar.gz" \
+      || exit 1
+    echo "Downloaded dav1d library."
+  fi
+  if [ -n "$dav1d_dir" ]; then
+    echo "dav1d library exists."
+  else
+    tar -xzf dav1d-0.4.0.tar.gz || exit 1
+    echo "Unpacked dav1d library."
+    dav1d_dir=$( ls -l | grep '^d' | grep dav1d | awk '{ print $9 }' )
+  fi
+
+  cd $dav1d_dir
+  if [ -f build/src/libdav1d.a ]; then
+    :
+  else
+    meson build -Ddefault_library=static \
+      -Denable_tests=false -Dbitdepths=8 \
+      -Denable_tools=false || exit 1
+    ninja -C build || exit 1
+  fi
+  cp build/src/libdav1d.a $work_dir/ffmpeg_build/lib || exit 1
+  cp -r include/dav1d $work_dir/ffmpeg_build/include || exit 1
+  cp -r build/include/dav1d $work_dir/ffmpeg_build/include || exit 1
+
   cd $work_dir
-  mkdir -p ffmpeg_sources
-  cd ffmpeg_sources
+  echo "prefix=${work_dir}/ffmpeg_build" > dav1d.pc
+  cat _dav1d.pc >> dav1d.pc
+  mv dav1d.pc $work_dir/ffmpeg_build/lib/pkgconfig
+}
+
+build_fdkaac(){
+  cd $work_dir/ffmpeg_sources
 
   if [ -f "fdk_aac-v2.0.0.tar.gz" ]; then
     :
@@ -266,10 +311,10 @@ build_ffmpeg(){
   ${make_program} -j${threads} && ${make_program} install || exit 1
 }
 
+if [[ `uname` != Linux ]]; then
+  check_dependencies || exit 1
+fi
 
-# if [[ `uname` != Linux ]]; then 
-#  check_dependencies || exit 1
-# fi
 download_ffmpeg || exit 1
 
 if [[ $enable_x264 == 1 ]]; then
@@ -277,6 +322,9 @@ if [[ $enable_x264 == 1 ]]; then
 fi
 if [[ $enable_x265 == 1 ]]; then
   build_x265 || exit 1
+fi
+if [[ $enable_dav1d == 1 ]]; then
+  build_dav1d || exit 1
 fi
 if [[ $enable_fdkaac == 1 ]]; then
   build_fdkaac || exit 1
