@@ -2,7 +2,6 @@
 
 A script to download and compile ffmpeg for personal use.  
 Only static build is available at the moment.  
-Tested under msys2.  
 
 Dependencies:
 
@@ -11,6 +10,7 @@ autoconf automake make cmake pkg-config nasm libtool
 ```
 
 dav1d needs `meson ninja`
+
 ffplay needs `libsdl2-dev`
 
 External libraries:

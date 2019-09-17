@@ -20,7 +20,7 @@ BUILD_OPT="
   --libdir="$work_dir/ffmpeg_build/bin" \
   --disable-hwaccels \
   --disable-filters \
-  --enable-filter=aresample,resample,resize,psnr,ssim,subtitles,scale \
+  --enable-filter=aresample,resize,psnr,ssim,subtitles,scale \
   --disable-bsfs \
   --disable-muxers \
   --enable-muxer=flac,h264,hevc,ico,matroska,mjpeg \
@@ -139,19 +139,19 @@ check_dependencies(){
 
 download_ffmpeg(){
   cd $work_dir
-  if [ -f "n4.2.tar.gz" ]; then
+  if [ -f "n4.2.1.tar.gz" ]; then
     :
   else 
-    echo "Downloading FFmpeg 4.2"
+    echo "Downloading FFmpeg 4.2.1"
     wget \
-      "https://github.com/FFmpeg/FFmpeg/archive/n4.2.tar.gz" \
+      "https://github.com/FFmpeg/FFmpeg/archive/n4.2.1.tar.gz" \
       || exit 1
-    echo "Downloaded FFmpeg 4.2"
+    echo "Downloaded FFmpeg 4.2.1"
   fi
   if [ -n "$ffmpeg_dir" ]; then
     echo "FFmpeg exists."
   else
-    tar -xzf n4.2.tar.gz || exit 1
+    tar -xzf n4.2.1.tar.gz || exit 1
     echo "Unpacked FFmpeg."
     ffmpeg_dir=$( ls -l | grep '^d' | grep FF | awk '{ print $9 }' )
   fi
