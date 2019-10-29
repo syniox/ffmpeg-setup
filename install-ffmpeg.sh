@@ -10,27 +10,25 @@ x264_dir=$( ls -l | grep '^d' | grep x264 | awk '{ print $9 }' )
 x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
 dav1d_dir=$( ls -l | grep '^d' | grep dav1d | awk '{ print $9 }' )
 fdkaac_dir=$( ls -l | grep '^d' | grep fdk | awk '{ print $9 }' )
-# libass_dir=$( ls -l | grep '^d' | grep ass | awk '{ print $9 }' )
+vmaf_dir=$( ls -l | grep ^d | grep vmaf | awk '{ print $9 }' )
+# libass_dir=$( ls -l | grep '^d' | grep ass | awk '{ print $9 }' )//add filter subtitles
 install_dependencies=""
 static_lib=0
 threads="2"
 BUILD_OPT="
   --prefix="$work_dir/ffmpeg_build" \
   --pkg-config-flags="--static" \
-  --libdir="$work_dir/ffmpeg_build/bin" \
   --disable-hwaccels \
   --disable-filters \
-  --enable-filter=aresample,resize,psnr,ssim,subtitles,scale \
+  --enable-filter=aresample,resize,psnr,ssim,scale,libvmaf \
   --disable-bsfs \
   --disable-muxers \
-  --enable-muxer=flac,h264,hevc,ico,matroska,mjpeg \
-  --enable-muxer=mp4,null,rawvideo,wav,yuv4mpegpipe \
+  --enable-muxer=flac,ico,matroska,mjpeg,mp4,null,rawvideo,wav,yuv4mpegpipe \
   --enable-gpl \
-  --enable-nonfree \
   --disable-decoders \
   --disable-encoders \
   --enable-decoder=aac,flac,h264,hevc,libdav1d,mjpeg,mp3,opus,png,rawvideo,vp9,yuv4 \
-  --enable-encoder=aac,libx264,libx265,libfdk_aac,mjpeg,rawvideo,wrapped_avframe
+  --enable-encoder=aac,libx264,libx265,libfdk_aac,mjpeg,rawvideo,wrapped_avframe,libopus,pcm_s16le
 "
 
 # some problems occured when compiling with mingw32-make, use make for msys2 at the moment
@@ -53,6 +51,8 @@ Help:
   --enable-libx265     include x265 library(default disabled)
   --enable-libdav1d    include dav1d library(default disabled)
   --enable-libfdkaac   include fdkaac library(default disabled)
+  --enable-libvmaf     include system vmaf library(default disabled)
+  --enable-libopus     include system opus library(default disabled)
 EOF
 exit 1
 fi
@@ -86,8 +86,13 @@ for opt do
       ;;
     --enable-libfdkaac)
       echo "fdkaac enabled."
-      BUILD_OPT="${BUILD_OPT} --enable-libfdk-aac"
+      BUILD_OPT="${BUILD_OPT} --enable-libfdk-aac --enable-nonfree "
       enable_fdkaac=1
+      ;;
+    --enable-libvmaf)
+      echo "libvmaf enabled."
+      BUILD_OPT="${BUILD_OPT} --enable-libvmaf"
+      enable_vmaf=1
       ;;
     *)
       echo "Unknown option $opt, stopped."
@@ -186,7 +191,7 @@ build_x264(){
       --enable-static \
       --enable-pic \
       --enable-lto || exit 1
-    ${make_program} -j${threads} && ${make_program} install || exit 1
+    $make_program -j$threads && $make_program install || exit 1
   fi
 }
 
@@ -213,13 +218,13 @@ build_x265(){
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x265.pc" ]; then
     cd $work_dir/ffmpeg_sources/$x265_dir/source
     cmake -G "Unix Makefiles" \
-      -DCMAKE_MAKE_PROGRAM=${make_program} \
+      -DCMAKE_MAKE_PROGRAM=$make_program \
       -DENABLE_SHARED=0 \
       -DCMAKE_INSTALL_PREFIX="$work_dir/ffmpeg_build" \
       -DCMAKE_C_COMPILER=gcc \
       -DCMAKE_CXX_COMPILER=g++ \
       . || exit 1
-    ${make_program} -j${threads} && ${make_program} install || exit 1
+    $make_program -j$threads && $make_program install || exit 1
   fi
 }
 
@@ -229,19 +234,19 @@ build_dav1d(){
   mkdir -p $work_dir/ffmpeg_build/lib/pkgconfig
 
   cd $work_dir/ffmpeg_sources
-  if [ -f "dav1d-0.4.0.tar.gz" ]; then
+  if [ -f "dav1d-0.5.1.tar.gz" ]; then
     :
   else
     echo "Downloading fdk-aac library."
-    wget -O dav1d-0.4.0.tar.gz \
-      "https://github.com/videolan/dav1d/archive/0.4.0.tar.gz" \
+    wget -O dav1d-0.5.1.tar.gz \
+      "https://github.com/videolan/dav1d/archive/0.5.0.tar.gz" \
       || exit 1
     echo "Downloaded dav1d library."
   fi
   if [ -n "$dav1d_dir" ]; then
     echo "dav1d library exists."
   else
-    tar -xzf dav1d-0.4.0.tar.gz || exit 1
+    tar -xzf dav1d-0.5.1.tar.gz || exit 1
     echo "Unpacked dav1d library."
     dav1d_dir=$( ls -l | grep '^d' | grep dav1d | awk '{ print $9 }' )
   fi
@@ -260,7 +265,7 @@ build_dav1d(){
   cp -r build/include/dav1d $work_dir/ffmpeg_build/include || exit 1
 
   cd $work_dir
-  echo "prefix=${work_dir}/ffmpeg_build" > dav1d.pc
+  echo "prefix=$work_dir/ffmpeg_build" > dav1d.pc
   cat _dav1d.pc >> dav1d.pc
   mv dav1d.pc $work_dir/ffmpeg_build/lib/pkgconfig
 }
@@ -292,7 +297,35 @@ build_fdkaac(){
       --prefix=$work_dir/ffmpeg_build \
       --with-pic=yes \
       --enable-shared=no || exit 1
-    ${make_program} -j${threads} && ${make_program} install || exit 1
+    $make_program -j$threads && $make_program install || exit 1
+  fi
+}
+
+build_vmaf(){
+  cd $work_dir/ffmpeg_sources
+  if [ -f "vmaf-1.3.15.tar.gz" ]; then
+    :
+  else
+    echo "Downloading vmaf library..."
+    wget -O vmaf-1.3.15.tar.gz \
+      https://github.com/Netflix/vmaf/archive/v1.3.15.tar.gz \
+      || exit 1
+    echo "Downloaded vmaf library."
+  fi
+
+  if [ -n $vmaf_dif ]; then
+    echo "vmaf library exists."
+  else
+    tar -xzf vmaf-1.3.15.tar.gz || exit 1
+    echo "Unpacked vmaf library."
+    vmaf_dir=$( ls -l | grep '^d' | grep vmaf | awk '{ print $9 }' )
+  fi
+
+  if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/libvmaf.pc" ]; then
+    cd $work_dir/ffmpeg_sources/$vmaf_dir
+    make -j$threads && make DESTDIR="$work_dir/temp" install
+    cp -r "$work_dir/temp/usr/local/*" "$work_dir/ffmpeg_build/"
+    rm -r "$work_dir/temp"
   fi
 }
 
@@ -301,6 +334,7 @@ build_ffmpeg(){
   if [[ $static_lib == 1 ]]; then
     BUILD_OPT="${BUILD_OPT} --disable-shared --enable-static"
   else
+    BUILD_OPT="--libdir=\"$work_dir/ffmpeg_build/bin\" ${BUILD_OPT}"
     BUILD_OPT="${BUILD_OPT} --enable-shared --disable-static"
   fi
   PKG_CONFIG_PATH="$work_dir/ffmpeg_build/lib/pkgconfig/" \
@@ -329,6 +363,10 @@ fi
 if [[ $enable_fdkaac == 1 ]]; then
   build_fdkaac || exit 1
 fi
+# libvmaf needs seperate models, can't be together with ffmpeg?
+# if [[ $enable_vmaf == 1 ]]; then
+#   build_vmaf || exit 1
+# fi
 
 build_ffmpeg || exit 1
 
