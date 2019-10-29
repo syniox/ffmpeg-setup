@@ -19,3 +19,8 @@ External libraries:
 * libx265
 * libdav1d
 * libfdk-aac
+
+System libraries:
+
+* libopus
+* libvmaf
