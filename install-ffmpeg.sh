@@ -15,148 +15,55 @@ vmaf_dir=$( ls -l | grep ^d | grep vmaf | awk '{ print $9 }' )
 install_dependencies=""
 static_lib=0
 threads="2"
+cross_compile=0
+cross_prefix=x86_64-w64-mingw32-
+c_compiler=${cross_prefix}gcc
+cxx_compiler=${cross_prefix}g++
+decoders=aac,flac,h264,hevc,mjpeg,mp3,opus,png,rawvideo,vp9,yuv4
+encoders=aacmjpeg,rawvideo,wrapped_avframe,pcm_s16le
+
 BUILD_OPT="
-  --prefix="$work_dir/ffmpeg_build" \
-  --pkg-config-flags="--static" \
-  --disable-hwaccels \
-  --disable-filters \
-  --enable-filter=aresample,resize,psnr,ssim,scale,libvmaf \
-  --disable-bsfs \
-  --disable-muxers \
-  --enable-muxer=flac,ico,matroska,mjpeg,mp4,null,rawvideo,wav,yuv4mpegpipe \
-  --enable-gpl \
-  --disable-decoders \
-  --disable-encoders \
-  --enable-decoder=aac,flac,h264,hevc,libdav1d,mjpeg,mp3,opus,png,rawvideo,vp9,yuv4 \
-  --enable-encoder=aac,libx264,libx265,libfdk_aac,mjpeg,rawvideo,wrapped_avframe,libopus,pcm_s16le
+  --pkg-config-flags="--static"
+  --disable-debug
+  --disable-hwaccels
+  --disable-filters
+  --enable-filter=aresample,resize,psnr,ssim,scale,libvmaf
+  --disable-bsfs
+  --disable-muxers
+  --enable-muxer=flac,ico,matroska,mjpeg,mp4,null,rawvideo,wav,yuv4mpegpipe
+  --enable-gpl
+  --disable-decoders
+  --disable-encoders
+  --enable-decoder=
+  --enable-encoder=
 "
 
-# some problems occured when compiling with mingw32-make, use make for msys2 at the moment
-make_program=make
-# if [[ `uname` == Linux ]]; then
-#   make_program=make
-# else
-#   make_program=mingw32-make
-# fi
+cmake_cross_command="
+  -DCMAKE_SYSTEM_NAME=Windows \
+  -DCMAKE_FIND_ROOT_PATH=/usr/x86_64-w64-mingw32 \
+  -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+  -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+  -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+  -DCMAKE_C_COMPILER=$c_compiler \
+  -DCMAKE_CXX_COMPILER=$cxx_compiler \
+  -DCMAKE_RANLIB=${cross_prefix}ranlib \
+  -DCMAKE_RC_COMPILER=${cross_prefix}windres \
+"
 
-if test x"$1" = x"-h" -o x"$1" = x"--help" ; then
-cat <<EOF
-Usage: $0 [options]
-Help:
-  -h, --help           print this message
-  -i                   install dependencies automatically
-  -t=<int>(default:2)  set the number of threads in compilation
-  -x                   build static library(default: shared)
-  --enable-libx264     include x264 library(default disabled)
-  --enable-libx265     include x265 library(default disabled)
-  --enable-libdav1d    include dav1d library(default disabled)
-  --enable-libfdkaac   include fdkaac library(default disabled)
-  --enable-libvmaf     include system vmaf library(default disabled)
-  --enable-libopus     include system opus library(default disabled)
-EOF
-exit 1
-fi
-
-for opt do
-  optarg="${opt#*=}"
-  case "$opt" in 
-    -i)
-      install_dependencies="true"
-      ;;
-    -t=*)
-      threads="$optarg"
-      ;;
-    -x)
-      static_lib=1
-      ;;
-    --enable-libx264)
-      echo "x264 enabled."
-      BUILD_OPT="${BUILD_OPT} --enable-libx264"
-      enable_x264=1
-      ;;
-    --enable-libx265)
-      echo "x265 enabled."
-      BUILD_OPT="${BUILD_OPT} --enable-libx265"
-      enable_x265=1
-      ;;
-    --enable-libdav1d)
-      echo "dav1d enabled."
-      BUILD_OPT="${BUILD_OPT} --enable-libdav1d"
-      enable_dav1d=1
-      ;;
-    --enable-libfdkaac)
-      echo "fdkaac enabled."
-      BUILD_OPT="${BUILD_OPT} --enable-libfdk-aac --enable-nonfree "
-      enable_fdkaac=1
-      ;;
-    --enable-libvmaf)
-      echo "libvmaf enabled."
-      BUILD_OPT="${BUILD_OPT} --enable-libvmaf"
-      enable_vmaf=1
-      ;;
-    *)
-      echo "Unknown option $opt, stopped."
-      echo "Run $0 -h for help."
-      exit 1
-      ;;
-  esac
-done
-echo "threads: ${threads}"
-echo "Make Program: ${make_program}"
-
-check_dependencies(){
-  dependency_list=(
-    "git"
-    "tar"
-    "diffutils"
-    "wget"
-    "autoconf"
-    "automake"
-    "make"
-    "mingw-w64-x86_64-pkg-config"
-    "mingw-w64-x86_64-make"
-    "mingw-w64-x86_64-cmake"
-    "mingw-w64-x86_64-gcc"
-    "mingw-w64-x86_64-SDL2"
-    "mingw-w64-x86_64-nasm"
-    "mingw-w64-x86_64-libtool"
-  )
-  missing_dependencies=""
-
-  for dependency in "${dependency_list[@]}"; do
-    if pacman -Q $dependency > /dev/null 2>&1
-  	then echo "$dependency has been installed."  
-    else
-      if [[ -n $install_dependencies ]]; then 
-  	    pacman -S $dependency -q --noconfirm || exit 1
-      else
-  	    missing_dependencies="$missing_dependencies  $dependency"
-  	  fi
-    fi
-  done
-
-  if [[ -n $missing_dependencies ]] && [[ -z $install_dependencies ]]; then 
-    echo "missing required program(s): $missing_dependencies " >&2
-    echo "or add -i option to install them automatically." >&2
-    exit 1;
-  fi
-}
 
 download_ffmpeg(){
   cd $work_dir
-  if [ -f "n4.2.1.tar.gz" ]; then
-    :
-  else 
-    echo "Downloading FFmpeg 4.2.1"
+  if [ ! -f "n4.2.2.tar.gz" ]; then
+    echo "Downloading FFmpeg 4.2.2"
     wget \
-      "https://github.com/FFmpeg/FFmpeg/archive/n4.2.1.tar.gz" \
+      "https://github.com/FFmpeg/FFmpeg/archive/n4.2.2.tar.gz" \
       || exit 1
-    echo "Downloaded FFmpeg 4.2.1"
+    echo "Downloaded FFmpeg 4.2.2"
   fi
   if [ -n "$ffmpeg_dir" ]; then
     echo "FFmpeg exists."
   else
-    tar -xzf n4.2.1.tar.gz || exit 1
+    tar -xzf n4.2.2.tar.gz || exit 1
     echo "Unpacked FFmpeg."
     ffmpeg_dir=$( ls -l | grep '^d' | grep FF | awk '{ print $9 }' )
   fi
@@ -165,66 +72,60 @@ download_ffmpeg(){
 build_x264(){
   cd $work_dir/ffmpeg_sources
 
-  if [ -f "last_x264.tar.bz2" ]; then
-    :
-  else
+  if [ ! -f "x264-master.tar.gz" ]; then
     echo "Downloading x264 library."
     wget \
-      "http://ftp.videolan.org/pub/x264/snapshots/last_x264.tar.bz2" \
+      "https://code.videolan.org/videolan/x264/-/archive/master/x264-master.tar.gz" \
       || exit 1
     echo "Downloaded x264 library."
   fi
   if [ -n "$x264_dir" ]; then
     echo "x264 library exists."
   else
-    tar -xjf last_x264.tar.bz2 || exit 1
+    tar -xzf x264-master.tar.gz || exit 1
     echo "Unpacked x264 library."
     x264_dir=$( ls -l | grep '^d' | grep x264 | awk '{ print $9 }' )
   fi
 
-  if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x264.pc" ]; then
-    cd $work_dir/ffmpeg_sources/$x264_dir
-    ./configure \
-      --prefix=$work_dir/ffmpeg_build \
-      --disable-avs \
-      --disable-opencl \
-      --enable-static \
-      --enable-pic \
-      --enable-lto || exit 1
-    $make_program -j$threads && $make_program install || exit 1
-  fi
+#  if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x264.pc" ]; then
+#    cd $work_dir/ffmpeg_sources/$x264_dir
+#    ./configure \
+#      --prefix=$work_dir/ffmpeg_build \
+#      --disable-avs \
+#      --disable-opencl \
+#      --enable-static \
+#      --enable-pic \
+#      --enable-lto || exit 1
+#    $make_program -j$threads && $make_program install || exit 1
+#  fi
 }
 
 build_x265(){
   cd $work_dir/ffmpeg_sources
 
-  if [ -f "x265_3.0.tar.gz" ]; then
-    :
-  else
-    echo "Downloading x265 library."
+  if [ ! -f "x265_3.0.tar.gz" ]; then
     wget \
       "http://ftp.videolan.org/pub/videolan/x265/x265_3.0.tar.gz" \
       || exit 1
-    echo "Downloaded x265 library."
   fi
-  if [ -n "$x265_dir" ]; then
-    echo "x265 library exists."
-  else 
+  if [ ! -n "$x265_dir" ]; then
     tar -xzf x265_3.0.tar.gz || exit 1
-    echo "Unpacked x265 library."
     x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
   fi
 
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x265.pc" ]; then
     cd $work_dir/ffmpeg_sources/$x265_dir/source
-    cmake -G "Unix Makefiles" \
-      -DCMAKE_MAKE_PROGRAM=$make_program \
-      -DENABLE_SHARED=0 \
-      -DCMAKE_INSTALL_PREFIX="$work_dir/ffmpeg_build" \
-      -DCMAKE_C_COMPILER=gcc \
-      -DCMAKE_CXX_COMPILER=g++ \
-      . || exit 1
-    $make_program -j$threads && $make_program install || exit 1
+    rm -rf build && mkdir build && cd build
+    local cmake_command="
+      -DCMAKE_MAKE_PROGRAM=$make_program
+      -DENABLE_SHARED=0
+      -DCMAKE_INSTALL_PREFIX="$work_dir/ffmpeg_build"
+    "
+    if [ $cross_compile == 1 ]; then
+      cmake_command="$cmake_command $cmake_cross_command"
+	fi
+    cmake -G "Unix Makefiles" $cmake_command .. || exit 1
+    $make_program .. -j$threads && $make_program install || exit 1
   fi
 }
 
@@ -234,19 +135,17 @@ build_dav1d(){
   mkdir -p $work_dir/ffmpeg_build/lib/pkgconfig
 
   cd $work_dir/ffmpeg_sources
-  if [ -f "dav1d-0.5.1.tar.gz" ]; then
-    :
-  else
+  if [ ! -f "dav1d-0.5.2.tar.gz" ]; then
     echo "Downloading fdk-aac library."
-    wget -O dav1d-0.5.1.tar.gz \
-      "https://github.com/videolan/dav1d/archive/0.5.0.tar.gz" \
+    wget -O dav1d-0.5.2.tar.gz \
+      "https://github.com/videolan/dav1d/archive/0.5.2.tar.gz" \
       || exit 1
     echo "Downloaded dav1d library."
   fi
   if [ -n "$dav1d_dir" ]; then
     echo "dav1d library exists."
   else
-    tar -xzf dav1d-0.5.1.tar.gz || exit 1
+    tar -xzf dav1d-0.5.2.tar.gz || exit 1
     echo "Unpacked dav1d library."
     dav1d_dir=$( ls -l | grep '^d' | grep dav1d | awk '{ print $9 }' )
   fi
@@ -273,9 +172,7 @@ build_dav1d(){
 build_fdkaac(){
   cd $work_dir/ffmpeg_sources
 
-  if [ -f "fdk_aac-v2.0.0.tar.gz" ]; then
-    :
-  else
+  if [ ! -f "fdk_aac-v2.0.0.tar.gz" ]; then
     echo "Downloading fdk-aac library."
     wget -O fdk_aac-v2.0.0.tar.gz \
       "https://github.com/mstorsjo/fdk-aac/archive/v2.0.0.tar.gz" \
@@ -303,21 +200,15 @@ build_fdkaac(){
 
 build_vmaf(){
   cd $work_dir/ffmpeg_sources
-  if [ -f "vmaf-1.3.15.tar.gz" ]; then
-    :
-  else
-    echo "Downloading vmaf library..."
+  if [ ! -f "vmaf-1.3.15.tar.gz" ]; then
     wget -O vmaf-1.3.15.tar.gz \
       https://github.com/Netflix/vmaf/archive/v1.3.15.tar.gz \
       || exit 1
     echo "Downloaded vmaf library."
   fi
 
-  if [ -n $vmaf_dif ]; then
-    echo "vmaf library exists."
-  else
+  if [ ! -n $vmaf_dif ]; then
     tar -xzf vmaf-1.3.15.tar.gz || exit 1
-    echo "Unpacked vmaf library."
     vmaf_dir=$( ls -l | grep '^d' | grep vmaf | awk '{ print $9 }' )
   fi
 
@@ -334,22 +225,105 @@ build_ffmpeg(){
   if [[ $static_lib == 1 ]]; then
     BUILD_OPT="${BUILD_OPT} --disable-shared --enable-static"
   else
-    BUILD_OPT="--libdir=\"$work_dir/ffmpeg_build/bin\" ${BUILD_OPT}"
     BUILD_OPT="${BUILD_OPT} --enable-shared --disable-static"
+  fi
+  echo configuring...
+  if [ $cross_compile == 1 ]; then
+    BUILD_OPT="${BUILD_OPT} \
+      --arch=x86_64 \
+      --target-os=mingw32 \
+      --cross-prefix=$cross_prefix \
+    "
   fi
   PKG_CONFIG_PATH="$work_dir/ffmpeg_build/lib/pkgconfig/" \
   CFLAGS="-I$work_dir/ffmpeg_build/include" \
   LDFLAGS="-L$work_dir/ffmpeg_build/lib" \
   LIBS="-lpthread -lm -lgcc" \
-  sh ./configure ${BUILD_OPT} || exit 1
-  ${make_program} -j${threads} && ${make_program} install || exit 1
+  bash ./configure ${BUILD_OPT} || exit 1
+  ${make_program} -j${threads} ||exit 1
+  ${make_program} DESTEIR=$work_dir/ffmpeg_build install || exit 1
+  if [[ $static_lib == 0 ]]; then
+    cp $work_dir/ffmpeg_build/lib/*.dll $work_dir/ffmpeg_build/bin/
+  fi
 }
 
-if [[ `uname` != Linux ]]; then
-  check_dependencies || exit 1
+# some problems occured when compiling with mingw32-make, use make for msys2 at the moment
+make_program=make
+
+if test x"$1" = x"-h" -o x"$1" = x"--help" ; then
+cat <<EOF
+Usage: $0 [options]
+Help:
+  -h, --help           print this message
+  -t=<int>(default:2)  set the number of threads in compilation
+  -x                   build static library (default: shared)
+  --cross-compiler     compile ffmpeg for windows in linux (default:native)
+  --libx264            include x264 library (default disabled)
+  --libx265            include x265 library (default disabled)
+  --libdav1d           include dav1d library (default disabled)
+  --libfdkaac          include fdkaac library (default disabled)
+  --sys-libopus        include system opus library (default disabled)
+  --sys-libvmaf        include system vmaf library (default disabled)
+EOF
+exit 1
 fi
 
-download_ffmpeg || exit 1
+for opt do
+  optarg="${opt#*=}"
+  case "$opt" in 
+    -t=*)
+      threads="$optarg"
+      ;;
+    -x)
+      static_lib=1
+      ;;
+    --cross-compile)
+      cross_compile=1
+      ;;
+    --libx264)
+      echo "x264 enabled."
+      BUILD_OPT="${BUILD_OPT} --enable-libx264"
+      encoders="$encoders,libx264"
+      enable_x264=1
+      ;;
+    --libx265)
+      echo "x265 enabled."
+      BUILD_OPT="${BUILD_OPT} --enable-libx265"
+      encoders="$encoders,libx265"
+      enable_x265=1
+      ;;
+    --libdav1d)
+      echo "dav1d enabled."
+      BUILD_OPT="${BUILD_OPT} --enable-libdav1d"
+      decoders="$decoders,libdav1d"
+      enable_dav1d=1
+      ;;
+    --libfdkaac)
+      echo "fdkaac enabled."
+      BUILD_OPT="${BUILD_OPT} --enable-libfdk-aac --enable-nonfree "
+      encoders="$encoders,libfdk_aac"
+      enable_fdkaac=1
+      ;;
+    --sys-libvmaf)
+      echo "vmaf enabled."
+      BUILD_OPT="${BUILD_OPT} --enable-libvmaf"
+      ;;
+    --sys-libopus)
+      echo "opus enabled."
+      BUILD_OPT="${BUILD_OPT} --enable-libopus"
+      encoders="$encoders,libopus"
+      ;;
+    *)
+      echo "Unknown option $opt, stopped."
+      echo "Run $0 -h for help."
+      exit 1
+      ;;
+  esac
+done
+echo "threads: ${threads}"
+echo "Make Program: ${make_program}"
+
+# download_ffmpeg || exit 1
 
 if [[ $enable_x264 == 1 ]]; then
   build_x264 || exit 1
@@ -363,10 +337,6 @@ fi
 if [[ $enable_fdkaac == 1 ]]; then
   build_fdkaac || exit 1
 fi
-# libvmaf needs seperate models, can't be together with ffmpeg?
-# if [[ $enable_vmaf == 1 ]]; then
-#   build_vmaf || exit 1
-# fi
 
 build_ffmpeg || exit 1
 

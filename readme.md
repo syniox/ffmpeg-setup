@@ -1,7 +1,8 @@
 ### ffmpeg-setup
 
-A script to download and compile ffmpeg for personal use.  
-Only static build is available at the moment.  
+**WIP**
+
+A script to download and compile ffmpeg with simplicity and lightweight in mind.  
 
 Dependencies:
 
