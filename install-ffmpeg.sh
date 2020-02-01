@@ -17,39 +17,45 @@ static_lib=0
 threads="2"
 cross_compile=0
 cross_prefix=x86_64-w64-mingw32-
+cross_root=/usr/x86_64-w64-mingw32
 c_compiler=${cross_prefix}gcc
 cxx_compiler=${cross_prefix}g++
+filters=aresample,resize,psnr,ssim,scale
 decoders=aac,flac,h264,hevc,mjpeg,mp3,opus,png,rawvideo,vp9,yuv4
-encoders=aacmjpeg,rawvideo,wrapped_avframe,pcm_s16le
+encoders=aac,mjpeg,rawvideo,wrapped_avframe,pcm_s16le
 
-BUILD_OPT="
+build_opt="
+  --prefix=/
   --pkg-config-flags="--static"
   --disable-debug
   --disable-hwaccels
   --disable-filters
-  --enable-filter=aresample,resize,psnr,ssim,scale,libvmaf
   --disable-bsfs
   --disable-muxers
   --enable-muxer=flac,ico,matroska,mjpeg,mp4,null,rawvideo,wav,yuv4mpegpipe
   --enable-gpl
   --disable-decoders
   --disable-encoders
-  --enable-decoder=
-  --enable-encoder=
 "
 
+# CMAKE_SYSTEM_NAME: fix -rdynamic
 cmake_cross_command="
-  -DCMAKE_SYSTEM_NAME=Windows \
-  -DCMAKE_FIND_ROOT_PATH=/usr/x86_64-w64-mingw32 \
-  -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
-  -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
-  -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
-  -DCMAKE_C_COMPILER=$c_compiler \
-  -DCMAKE_CXX_COMPILER=$cxx_compiler \
-  -DCMAKE_RANLIB=${cross_prefix}ranlib \
-  -DCMAKE_RC_COMPILER=${cross_prefix}windres \
+  -DCMAKE_SYSTEM_NAME=Windows
+  -DCMAKE_FIND_ROOT_PATH=$cross_root
+  -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER
+  -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY
+  -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY
+  -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+  -DCMAKE_C_COMPILER=$c_compiler
+  -DCMAKE_CXX_COMPILER=$cxx_compiler
+  -DCMAKE_RANLIB=${cross_prefix}ranlib
+  -DCMAKE_RC_COMPILER=${cross_prefix}windres
 "
 
+make_install(){
+  $make_program -j$threads || exit 1
+  $make_program install DESTDIR=$work_dir/ffmpeg_build || exit 1
+}
 
 download_ffmpeg(){
   cd $work_dir
@@ -87,17 +93,23 @@ build_x264(){
     x264_dir=$( ls -l | grep '^d' | grep x264 | awk '{ print $9 }' )
   fi
 
-#  if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x264.pc" ]; then
-#    cd $work_dir/ffmpeg_sources/$x264_dir
-#    ./configure \
-#      --prefix=$work_dir/ffmpeg_build \
-#      --disable-avs \
-#      --disable-opencl \
-#      --enable-static \
-#      --enable-pic \
-#      --enable-lto || exit 1
-#    $make_program -j$threads && $make_program install || exit 1
-#  fi
+  if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x264.pc" ]; then
+    cd $work_dir/ffmpeg_sources/$x264_dir
+    local opt="
+      --prefix=/ --enable-static
+      --enable-lto --enable-pic
+      --disable-avs --disable-opencl
+      --enable-strip
+    "
+    if [ $cross_compile == 1 ]; then
+      opt="$opt
+        --cross-prefix=$cross_prefix
+        --host=x86_64-w64-mingw32
+      "
+    fi
+    ./configure $opt || exit 1
+    make_install
+  fi
 }
 
 build_x265(){
@@ -119,13 +131,12 @@ build_x265(){
     local cmake_command="
       -DCMAKE_MAKE_PROGRAM=$make_program
       -DENABLE_SHARED=0
-      -DCMAKE_INSTALL_PREFIX="$work_dir/ffmpeg_build"
     "
     if [ $cross_compile == 1 ]; then
       cmake_command="$cmake_command $cmake_cross_command"
-	fi
+    fi
     cmake -G "Unix Makefiles" $cmake_command .. || exit 1
-    $make_program .. -j$threads && $make_program install || exit 1
+    make_install
   fi
 }
 
@@ -151,9 +162,7 @@ build_dav1d(){
   fi
 
   cd $dav1d_dir
-  if [ -f build/src/libdav1d.a ]; then
-    :
-  else
+  if [ ! -f build/src/libdav1d.a ]; then
     meson build -Ddefault_library=static \
       -Denable_tests=false -Dbitdepths=8 \
       -Denable_tools=false || exit 1
@@ -194,7 +203,7 @@ build_fdkaac(){
       --prefix=$work_dir/ffmpeg_build \
       --with-pic=yes \
       --enable-shared=no || exit 1
-    $make_program -j$threads && $make_program install || exit 1
+    make_install
   fi
 }
 
@@ -223,28 +232,30 @@ build_vmaf(){
 build_ffmpeg(){
   cd $work_dir/$ffmpeg_dir
   if [[ $static_lib == 1 ]]; then
-    BUILD_OPT="${BUILD_OPT} --disable-shared --enable-static"
+    build_opt="$build_opt --disable-shared --enable-static"
   else
-    BUILD_OPT="${BUILD_OPT} --enable-shared --disable-static"
+    build_opt="$build_opt --enable-shared --disable-static"
   fi
   echo configuring...
   if [ $cross_compile == 1 ]; then
-    BUILD_OPT="${BUILD_OPT} \
+    build_opt="$build_opt \
       --arch=x86_64 \
       --target-os=mingw32 \
       --cross-prefix=$cross_prefix \
     "
   fi
+  build_opt="$build_opt --enable-decoder=$decoders"
+  build_opt="$build_opt --enable-encoder=$encoders"
+  build_opt="$build_opt --enable-filter=$filters"
   PKG_CONFIG_PATH="$work_dir/ffmpeg_build/lib/pkgconfig/" \
   CFLAGS="-I$work_dir/ffmpeg_build/include" \
   LDFLAGS="-L$work_dir/ffmpeg_build/lib" \
   LIBS="-lpthread -lm -lgcc" \
-  bash ./configure ${BUILD_OPT} || exit 1
-  ${make_program} -j${threads} ||exit 1
-  ${make_program} DESTEIR=$work_dir/ffmpeg_build install || exit 1
-  if [[ $static_lib == 0 ]]; then
-    cp $work_dir/ffmpeg_build/lib/*.dll $work_dir/ffmpeg_build/bin/
-  fi
+  bash ./configure $build_opt || exit 1
+  make_install
+#  if [[ $static_lib == 0 ]]; then
+#    cp $work_dir/ffmpeg_build/lib/*.dll $work_dir/ffmpeg_build/bin/
+#  fi
 }
 
 # some problems occured when compiling with mingw32-make, use make for msys2 at the moment
@@ -282,35 +293,35 @@ for opt do
       ;;
     --libx264)
       echo "x264 enabled."
-      BUILD_OPT="${BUILD_OPT} --enable-libx264"
+      build_opt="$build_opt --enable-libx264"
       encoders="$encoders,libx264"
       enable_x264=1
       ;;
     --libx265)
       echo "x265 enabled."
-      BUILD_OPT="${BUILD_OPT} --enable-libx265"
+      build_opt="$build_opt --enable-libx265"
       encoders="$encoders,libx265"
       enable_x265=1
       ;;
     --libdav1d)
       echo "dav1d enabled."
-      BUILD_OPT="${BUILD_OPT} --enable-libdav1d"
+      build_opt="$build_opt --enable-libdav1d"
       decoders="$decoders,libdav1d"
       enable_dav1d=1
       ;;
     --libfdkaac)
       echo "fdkaac enabled."
-      BUILD_OPT="${BUILD_OPT} --enable-libfdk-aac --enable-nonfree "
+      build_opt="$build_opt --enable-libfdk-aac --enable-nonfree "
       encoders="$encoders,libfdk_aac"
       enable_fdkaac=1
       ;;
     --sys-libvmaf)
       echo "vmaf enabled."
-      BUILD_OPT="${BUILD_OPT} --enable-libvmaf"
+      build_opt="$build_opt --enable-libvmaf"
       ;;
     --sys-libopus)
       echo "opus enabled."
-      BUILD_OPT="${BUILD_OPT} --enable-libopus"
+      build_opt="$build_opt --enable-libopus"
       encoders="$encoders,libopus"
       ;;
     *)
