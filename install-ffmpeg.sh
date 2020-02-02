@@ -2,17 +2,6 @@
 
 current_dir=$( pwd )
 work_dir=$(cd $(dirname $0); pwd)
-cd $work_dir
-ffmpeg_dir=$( ls -l | grep '^d' | grep FF | awk '{ print $9 }' )
-cd $work_dir && mkdir -p ffmpeg_sources
-cd ffmpeg_sources
-x264_dir=$( ls -l | grep '^d' | grep x264 | awk '{ print $9 }' )
-x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
-dav1d_dir=$( ls -l | grep '^d' | grep dav1d | awk '{ print $9 }' )
-fdkaac_dir=$( ls -l | grep '^d' | grep fdk | awk '{ print $9 }' )
-vmaf_dir=$( ls -l | grep ^d | grep vmaf | awk '{ print $9 }' )
-# libass_dir=$( ls -l | grep '^d' | grep ass | awk '{ print $9 }' )//add filter subtitles
-install_dependencies=""
 static_lib=0
 threads="2"
 cross_compile=0
@@ -23,6 +12,15 @@ cxx_compiler=${cross_prefix}g++
 filters=aresample,resize,psnr,ssim,scale
 decoders=aac,flac,h264,hevc,mjpeg,mp3,opus,png,rawvideo,vp9,yuv4
 encoders=aac,mjpeg,rawvideo,wrapped_avframe,pcm_s16le
+
+cd $work_dir && mkdir -p ffmpeg_sources
+cd ffmpeg_sources
+vmaf_dir=$( ls -l | grep '^d' | grep vmaf | awk '{ print $9 }' )
+ffmpeg_dir=$( ls -l | grep '^d' | grep FF | awk '{ print $9 }' )
+x264_dir=$( ls -l | grep '^d' | grep x264 | awk '{ print $9 }' )
+x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
+dav1d_dir=$( ls -l | grep '^d' | grep dav1d | awk '{ print $9 }' )
+fdkaac_dir=$( ls -l | grep '^d' | grep fdk | awk '{ print $9 }' )
 
 build_opt="
   --prefix=/
@@ -39,16 +37,15 @@ build_opt="
 "
 
 # CMAKE_SYSTEM_NAME: fix -rdynamic
+# For x265: DCMAKE_RANLIB=${cross_prefix}ranlib could cause link error?
 cmake_cross_command="
   -DCMAKE_SYSTEM_NAME=Windows
   -DCMAKE_FIND_ROOT_PATH=$cross_root
   -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER
   -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY
   -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY
-  -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
   -DCMAKE_C_COMPILER=$c_compiler
   -DCMAKE_CXX_COMPILER=$cxx_compiler
-  -DCMAKE_RANLIB=${cross_prefix}ranlib
   -DCMAKE_RC_COMPILER=${cross_prefix}windres
 "
 
@@ -129,6 +126,7 @@ build_x265(){
     cd $work_dir/ffmpeg_sources/$x265_dir/source
     rm -rf build && mkdir build && cd build
     local cmake_command="
+      -DCMAKE_INSTALL_PREFIX=/
       -DCMAKE_MAKE_PROGRAM=$make_program
       -DENABLE_SHARED=0
     "
@@ -181,17 +179,15 @@ build_dav1d(){
 build_fdkaac(){
   cd $work_dir/ffmpeg_sources
 
-  if [ ! -f "fdk_aac-v2.0.0.tar.gz" ]; then
-    echo "Downloading fdk-aac library."
-    wget -O fdk_aac-v2.0.0.tar.gz \
-      "https://github.com/mstorsjo/fdk-aac/archive/v2.0.0.tar.gz" \
+  if [ ! -f "fdk-aac-v2.0.1.tar.gz" ]; then
+    wget -O fdk_aac-v2.0.1.tar.gz \
+      "https://nchc.dl.sourceforge.net/project/opencore-amr/fdk-aac/fdk-aac-2.0.1.tar.gz" \
       || exit 1
-    echo "Downloaded fdk-aac library."
   fi
   if [ -n "$fdkaac_dir" ]; then
     echo "fdkaac library exists."
   else
-    tar -xzf fdk_aac-v2.0.0.tar.gz || exit 1
+    tar -xzf fdk-aac-v2.0.1.tar.gz || exit 1
     echo "Unpacked fdkaac library."
     fdkaac_dir=$( ls -l | grep '^d' | grep fdk | awk '{ print $9 }' )
   fi
@@ -199,10 +195,14 @@ build_fdkaac(){
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/fdk-aac.pc" ]; then
     cd $work_dir/ffmpeg_sources/$fdkaac_dir
     autoreconf -fi 
-    ./configure \
-      --prefix=$work_dir/ffmpeg_build \
-      --with-pic=yes \
-      --enable-shared=no || exit 1
+    local opt="
+      --prefix=/ --with-pic=yes
+      --enable-shared=no
+    "
+    if [ $cross_compile == 1 ]; then
+      opt+="--host=x86_64-w64-mingw32 CC=$c_compiler CXX=$cxx_compiler"
+    fi
+    ./configure $opt || exit 1
     make_install
   fi
 }
@@ -236,26 +236,27 @@ build_ffmpeg(){
   else
     build_opt="$build_opt --enable-shared --disable-static"
   fi
-  echo configuring...
-  if [ $cross_compile == 1 ]; then
-    build_opt="$build_opt \
-      --arch=x86_64 \
-      --target-os=mingw32 \
-      --cross-prefix=$cross_prefix \
-    "
-  fi
+  build_opt="$build_opt --enable-filter=$filters"
   build_opt="$build_opt --enable-decoder=$decoders"
   build_opt="$build_opt --enable-encoder=$encoders"
-  build_opt="$build_opt --enable-filter=$filters"
-  PKG_CONFIG_PATH="$work_dir/ffmpeg_build/lib/pkgconfig/" \
+  if [ $cross_compile == 1 ]; then
+    build_opt="$build_opt
+      --arch=x86_64
+      --target-os=mingw32
+      --cross-prefix=$cross_prefix
+    "
+  fi
+  echo configuring...
+  PKG_CONFIG_PATH="$work_dir/ffmpeg_build/lib/pkgconfig" \
   CFLAGS="-I$work_dir/ffmpeg_build/include" \
   LDFLAGS="-L$work_dir/ffmpeg_build/lib" \
   LIBS="-lpthread -lm -lgcc" \
   bash ./configure $build_opt || exit 1
   make_install
-#  if [[ $static_lib == 0 ]]; then
-#    cp $work_dir/ffmpeg_build/lib/*.dll $work_dir/ffmpeg_build/bin/
-#  fi
+  if [ $static_lib == 0 ]; then
+    cp $work_dir/ffmpeg_build/lib/*.dll $work_dir/ffmpeg_build/bin/
+  fi
+  return 0
 }
 
 # some problems occured when compiling with mingw32-make, use make for msys2 at the moment
@@ -272,7 +273,7 @@ Help:
   --libx264            include x264 library (default disabled)
   --libx265            include x265 library (default disabled)
   --libdav1d           include dav1d library (default disabled)
-  --libfdkaac          include fdkaac library (default disabled)
+  --libfdk-aac         include fdkaac library (default disabled)
   --sys-libopus        include system opus library (default disabled)
   --sys-libvmaf        include system vmaf library (default disabled)
 EOF
@@ -309,7 +310,7 @@ for opt do
       decoders="$decoders,libdav1d"
       enable_dav1d=1
       ;;
-    --libfdkaac)
+    --libfdk-aac)
       echo "fdkaac enabled."
       build_opt="$build_opt --enable-libfdk-aac --enable-nonfree "
       encoders="$encoders,libfdk_aac"
@@ -334,7 +335,7 @@ done
 echo "threads: ${threads}"
 echo "Make Program: ${make_program}"
 
-# download_ffmpeg || exit 1
+download_ffmpeg || exit 1
 
 if [[ $enable_x264 == 1 ]]; then
   build_x264 || exit 1
