@@ -14,13 +14,15 @@ decoders=aac,flac,h264,hevc,mjpeg,mp3,opus,png,rawvideo,vp9,yuv4
 encoders=aac,mjpeg,rawvideo,wrapped_avframe,pcm_s16le
 
 cd $work_dir && mkdir -p ffmpeg_sources
+ffmpeg_dir=$( ls -l | grep '^d' | grep FF | awk '{ print $9 }' )
 cd ffmpeg_sources
 vmaf_dir=$( ls -l | grep '^d' | grep vmaf | awk '{ print $9 }' )
-ffmpeg_dir=$( ls -l | grep '^d' | grep FF | awk '{ print $9 }' )
 x264_dir=$( ls -l | grep '^d' | grep x264 | awk '{ print $9 }' )
 x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
 dav1d_dir=$( ls -l | grep '^d' | grep dav1d | awk '{ print $9 }' )
+lame_dir=$( ls -l | grep '^d' | grep lame | awk '{ print $9 }' )
 fdkaac_dir=$( ls -l | grep '^d' | grep fdk | awk '{ print $9 }' )
+
 
 build_opt="
   --prefix=/
@@ -30,7 +32,7 @@ build_opt="
   --disable-filters
   --disable-bsfs
   --disable-muxers
-  --enable-muxer=flac,ico,matroska,mjpeg,mp4,null,rawvideo,wav,yuv4mpegpipe
+  --enable-muxer=flac,ico,matroska,mjpeg,mp3,mp4,null,rawvideo,wav,yuv4mpegpipe
   --enable-gpl
   --disable-decoders
   --disable-encoders
@@ -52,6 +54,14 @@ cmake_cross_command="
 make_install(){
   $make_program -j$threads || exit 1
   $make_program install DESTDIR=$work_dir/ffmpeg_build || exit 1
+}
+
+generic_configure(){
+  opt="$1 --prefix=/ --with-pic=yes --enable-shared=no"
+  if [ $cross_compile == 1 ]; then
+    opt+="--host=x86_64-w64-mingw32 CC=$c_compiler CXX=$cxx_compiler"
+  fi
+  ./configure $opt
 }
 
 download_ffmpeg(){
@@ -82,9 +92,7 @@ build_x264(){
       || exit 1
     echo "Downloaded x264 library."
   fi
-  if [ -n "$x264_dir" ]; then
-    echo "x264 library exists."
-  else
+  if [ ! -n "$x264_dir" ]; then
     tar -xzf x264-master.tar.gz || exit 1
     echo "Unpacked x264 library."
     x264_dir=$( ls -l | grep '^d' | grep x264 | awk '{ print $9 }' )
@@ -96,7 +104,6 @@ build_x264(){
       --prefix=/ --enable-static
       --enable-lto --enable-pic
       --disable-avs --disable-opencl
-      --enable-strip
     "
     if [ $cross_compile == 1 ]; then
       opt="$opt
@@ -145,15 +152,13 @@ build_dav1d(){
 
   cd $work_dir/ffmpeg_sources
   if [ ! -f "dav1d-0.5.2.tar.gz" ]; then
-    echo "Downloading fdk-aac library."
+    echo "Downloading dav1d library."
     wget -O dav1d-0.5.2.tar.gz \
       "https://github.com/videolan/dav1d/archive/0.5.2.tar.gz" \
       || exit 1
     echo "Downloaded dav1d library."
   fi
-  if [ -n "$dav1d_dir" ]; then
-    echo "dav1d library exists."
-  else
+  if [ ! -n "$dav1d_dir" ]; then
     tar -xzf dav1d-0.5.2.tar.gz || exit 1
     echo "Unpacked dav1d library."
     dav1d_dir=$( ls -l | grep '^d' | grep dav1d | awk '{ print $9 }' )
@@ -176,6 +181,26 @@ build_dav1d(){
   mv dav1d.pc $work_dir/ffmpeg_build/lib/pkgconfig
 }
 
+build_lame(){
+  cd $work_dir/ffmpeg_sources
+
+  if [ ! -f "lame-3.100.tar.gz" ]; then
+    wget -O lame-3.100.tar.gz \
+      "https://sourceforge.net/projects/lame/files/latest/download" \
+      || exit 1
+  fi
+  if [ ! -n "$lame_dir" ]; then
+    tar -xzf lame-3.100.tar.gz || exit 1
+    lame_dir=$( ls -l | grep '^d' | grep lame | awk '{ print $9 }' )
+  fi
+
+  if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/mp3lame.pc" ]; then
+    cd $work_dir/ffmpeg_sources/$lame_dir
+	generic_configure "--enable-nasm" || exit 1
+    make_install
+  fi
+}
+
 build_fdkaac(){
   cd $work_dir/ffmpeg_sources
 
@@ -184,9 +209,7 @@ build_fdkaac(){
       "https://nchc.dl.sourceforge.net/project/opencore-amr/fdk-aac/fdk-aac-2.0.1.tar.gz" \
       || exit 1
   fi
-  if [ -n "$fdkaac_dir" ]; then
-    echo "fdkaac library exists."
-  else
+  if [ ! -n "$fdkaac_dir" ]; then
     tar -xzf fdk-aac-v2.0.1.tar.gz || exit 1
     echo "Unpacked fdkaac library."
     fdkaac_dir=$( ls -l | grep '^d' | grep fdk | awk '{ print $9 }' )
@@ -195,14 +218,7 @@ build_fdkaac(){
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/fdk-aac.pc" ]; then
     cd $work_dir/ffmpeg_sources/$fdkaac_dir
     autoreconf -fi 
-    local opt="
-      --prefix=/ --with-pic=yes
-      --enable-shared=no
-    "
-    if [ $cross_compile == 1 ]; then
-      opt+="--host=x86_64-w64-mingw32 CC=$c_compiler CXX=$cxx_compiler"
-    fi
-    ./configure $opt || exit 1
+	generic_configure || exit 1
     make_install
   fi
 }
@@ -232,13 +248,13 @@ build_vmaf(){
 build_ffmpeg(){
   cd $work_dir/$ffmpeg_dir
   if [[ $static_lib == 1 ]]; then
-    build_opt="$build_opt --disable-shared --enable-static"
+    build_opt+=" --disable-shared --enable-static"
   else
-    build_opt="$build_opt --enable-shared --disable-static"
+    build_opt+=" --enable-shared --disable-static"
   fi
-  build_opt="$build_opt --enable-filter=$filters"
-  build_opt="$build_opt --enable-decoder=$decoders"
-  build_opt="$build_opt --enable-encoder=$encoders"
+  build_opt+=" --enable-filter=$filters"
+  build_opt+=" --enable-decoder=$decoders"
+  build_opt+=" --enable-encoder=$encoders"
   if [ $cross_compile == 1 ]; then
     build_opt="$build_opt
       --arch=x86_64
@@ -273,6 +289,7 @@ Help:
   --libx264            include x264 library (default disabled)
   --libx265            include x265 library (default disabled)
   --libdav1d           include dav1d library (default disabled)
+  --libmp3lame         include mp3lame library (default disabled)
   --libfdk-aac         include fdkaac library (default disabled)
   --sys-libopus        include system opus library (default disabled)
   --sys-libvmaf        include system vmaf library (default disabled)
@@ -294,36 +311,42 @@ for opt do
       ;;
     --libx264)
       echo "x264 enabled."
-      build_opt="$build_opt --enable-libx264"
-      encoders="$encoders,libx264"
+      build_opt+=" --enable-libx264"
+      encoders+=",libx264"
       enable_x264=1
       ;;
     --libx265)
       echo "x265 enabled."
-      build_opt="$build_opt --enable-libx265"
-      encoders="$encoders,libx265"
+      build_opt+=" --enable-libx265"
+      encoders+=",libx265"
       enable_x265=1
       ;;
     --libdav1d)
       echo "dav1d enabled."
-      build_opt="$build_opt --enable-libdav1d"
-      decoders="$decoders,libdav1d"
+      build_opt+==" --enable-libdav1d"
+      decoders+=",libdav1d"
       enable_dav1d=1
       ;;
     --libfdk-aac)
       echo "fdkaac enabled."
-      build_opt="$build_opt --enable-libfdk-aac --enable-nonfree "
-      encoders="$encoders,libfdk_aac"
+      build_opt+=" --enable-libfdk-aac --enable-nonfree "
+      encoders+=",libfdk_aac"
       enable_fdkaac=1
+      ;;
+    --libmp3lame)
+      echo "mp3lame enabled."
+      build_opt+="--enable-libmp3lame"
+      encoders+=",libmp3lame"
+      enable_mp3lame=1
       ;;
     --sys-libvmaf)
       echo "vmaf enabled."
-      build_opt="$build_opt --enable-libvmaf"
+      build_opt+=" --enable-libvmaf"
       ;;
     --sys-libopus)
       echo "opus enabled."
-      build_opt="$build_opt --enable-libopus"
-      encoders="$encoders,libopus"
+      build_opt+=" --enable-libopus"
+      encoders+=",libopus"
       ;;
     *)
       echo "Unknown option $opt, stopped."
@@ -337,6 +360,8 @@ echo "Make Program: ${make_program}"
 
 download_ffmpeg || exit 1
 
+echo "configuring dependencies..."
+
 if [[ $enable_x264 == 1 ]]; then
   build_x264 || exit 1
 fi
@@ -345,6 +370,9 @@ if [[ $enable_x265 == 1 ]]; then
 fi
 if [[ $enable_dav1d == 1 ]]; then
   build_dav1d || exit 1
+fi
+if [[ $enable_mp3lame == 1 ]]; then
+  build_lame || exit 1
 fi
 if [[ $enable_fdkaac == 1 ]]; then
   build_fdkaac || exit 1
