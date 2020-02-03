@@ -1,8 +1,6 @@
-### ffmpeg-setup
+## ffmpeg-setup
 
-**WIP**
-
-A script to download and compile ffmpeg with simplicity and lightweight in mind.  
+A script to download and (cross-)compile ffmpeg under msys2/*nix.
 
 Dependencies:
 
@@ -14,14 +12,20 @@ dav1d needs `meson ninja`
 
 ffplay needs `libsdl2-dev`
 
-External libraries:
+
+### External libraries
 
 * libx264
 * libx265
 * libdav1d
+* libmp3lame
 * libfdk-aac
 
-System libraries:
+### System libraries
 
 * libopus
 * libvmaf
+
+### Known Issues
+
+* cannot cross-compile libx265
