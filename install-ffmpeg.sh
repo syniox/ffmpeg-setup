@@ -194,9 +194,9 @@ build_lame(){
     lame_dir=$( ls -l | grep '^d' | grep lame | awk '{ print $9 }' )
   fi
 
-  if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/mp3lame.pc" ]; then
+  if [ ! -f "$work_dir/ffmpeg_build/lib/libmp3lame.a" ]; then
     cd $work_dir/ffmpeg_sources/$lame_dir
-	generic_configure "--enable-nasm" || exit 1
+    generic_configure "--enable-nasm" || exit 1
     make_install
   fi
 }
@@ -335,7 +335,7 @@ for opt do
       ;;
     --libmp3lame)
       echo "mp3lame enabled."
-      build_opt+="--enable-libmp3lame"
+      build_opt+=" --enable-libmp3lame"
       encoders+=",libmp3lame"
       enable_mp3lame=1
       ;;
