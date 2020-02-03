@@ -180,7 +180,7 @@ build_fdkaac(){
   cd $work_dir/ffmpeg_sources
 
   if [ ! -f "fdk-aac-v2.0.1.tar.gz" ]; then
-    wget -O fdk_aac-v2.0.1.tar.gz \
+    wget -O fdk-aac-v2.0.1.tar.gz \
       "https://nchc.dl.sourceforge.net/project/opencore-amr/fdk-aac/fdk-aac-2.0.1.tar.gz" \
       || exit 1
   fi
@@ -269,7 +269,7 @@ Help:
   -h, --help           print this message
   -t=<int>(default:2)  set the number of threads in compilation
   -x                   build static library (default: shared)
-  --cross-compiler     compile ffmpeg for windows in linux (default:native)
+  --cross-compile      cross compile ffmpeg for windows (default:native)
   --libx264            include x264 library (default disabled)
   --libx265            include x265 library (default disabled)
   --libdav1d           include dav1d library (default disabled)
