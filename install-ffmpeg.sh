@@ -26,7 +26,7 @@ fdkaac_dir=$( ls -l | grep '^d' | grep fdk | awk '{ print $9 }' )
 
 build_opt="
   --prefix=/
-  --pkg-config-flags="--static"
+  --pkg-config-flags=--static
   --disable-debug
   --disable-hwaccels
   --disable-filters
@@ -68,7 +68,7 @@ download_ffmpeg(){
   cd $work_dir
   if [ ! -f "n4.2.2.tar.gz" ]; then
     echo "Downloading FFmpeg 4.2.2"
-    wget \
+    wget -c \
       "https://github.com/FFmpeg/FFmpeg/archive/n4.2.2.tar.gz" \
       || exit 1
     echo "Downloaded FFmpeg 4.2.2"
@@ -85,13 +85,9 @@ download_ffmpeg(){
 build_x264(){
   cd $work_dir/ffmpeg_sources
 
-  if [ ! -f "x264-master.tar.gz" ]; then
-    echo "Downloading x264 library."
-    wget \
-      "https://code.videolan.org/videolan/x264/-/archive/master/x264-master.tar.gz" \
-      || exit 1
-    echo "Downloaded x264 library."
-  fi
+  wget -c \
+    "https://code.videolan.org/videolan/x264/-/archive/master/x264-master.tar.gz" \
+    || exit 1
   if [ ! -n "$x264_dir" ]; then
     tar -xzf x264-master.tar.gz || exit 1
     echo "Unpacked x264 library."
@@ -119,11 +115,9 @@ build_x264(){
 build_x265(){
   cd $work_dir/ffmpeg_sources
 
-  if [ ! -f "x265_3.0.tar.gz" ]; then
-    wget \
-      "http://ftp.videolan.org/pub/videolan/x265/x265_3.0.tar.gz" \
-      || exit 1
-  fi
+  wget -c \
+    "http://ftp.videolan.org/videolan/x265/x265_3.2.1.tar.gz" \
+    || exit 1
   if [ ! -n "$x265_dir" ]; then
     tar -xzf x265_3.0.tar.gz || exit 1
     x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
@@ -151,13 +145,9 @@ build_dav1d(){
   mkdir -p $work_dir/ffmpeg_build/lib/pkgconfig
 
   cd $work_dir/ffmpeg_sources
-  if [ ! -f "dav1d-0.5.2.tar.gz" ]; then
-    echo "Downloading dav1d library."
-    wget -O dav1d-0.5.2.tar.gz \
-      "https://github.com/videolan/dav1d/archive/0.5.2.tar.gz" \
-      || exit 1
-    echo "Downloaded dav1d library."
-  fi
+  wget -c -O dav1d-0.5.2.tar.gz \
+    "https://github.com/videolan/dav1d/archive/0.5.2.tar.gz" \
+    || exit 1
   if [ ! -n "$dav1d_dir" ]; then
     tar -xzf dav1d-0.5.2.tar.gz || exit 1
     echo "Unpacked dav1d library."
@@ -167,8 +157,7 @@ build_dav1d(){
   cd $dav1d_dir
   if [ ! -f build/src/libdav1d.a ]; then
     meson build -Ddefault_library=static \
-      -Denable_tests=false -Dbitdepths=8 \
-      -Denable_tools=false || exit 1
+      -Denable_tests=false || exit 1
     ninja -C build || exit 1
   fi
   cp build/src/libdav1d.a $work_dir/ffmpeg_build/lib || exit 1
@@ -204,11 +193,9 @@ build_lame(){
 build_fdkaac(){
   cd $work_dir/ffmpeg_sources
 
-  if [ ! -f "fdk-aac-v2.0.1.tar.gz" ]; then
-    wget -O fdk-aac-v2.0.1.tar.gz \
-      "https://nchc.dl.sourceforge.net/project/opencore-amr/fdk-aac/fdk-aac-2.0.1.tar.gz" \
-      || exit 1
-  fi
+  wget -c -O fdk-aac-v2.0.1.tar.gz \
+    "https://nchc.dl.sourceforge.net/project/opencore-amr/fdk-aac/fdk-aac-2.0.1.tar.gz" \
+    || exit 1
   if [ ! -n "$fdkaac_dir" ]; then
     tar -xzf fdk-aac-v2.0.1.tar.gz || exit 1
     echo "Unpacked fdkaac library."
@@ -225,12 +212,9 @@ build_fdkaac(){
 
 build_vmaf(){
   cd $work_dir/ffmpeg_sources
-  if [ ! -f "vmaf-1.3.15.tar.gz" ]; then
-    wget -O vmaf-1.3.15.tar.gz \
-      https://github.com/Netflix/vmaf/archive/v1.3.15.tar.gz \
-      || exit 1
-    echo "Downloaded vmaf library."
-  fi
+  wget -c -O vmaf-1.3.15.tar.gz \
+    https://github.com/Netflix/vmaf/archive/v1.3.15.tar.gz \
+    || exit 1
 
   if [ ! -n $vmaf_dif ]; then
     tar -xzf vmaf-1.3.15.tar.gz || exit 1
@@ -262,6 +246,7 @@ build_ffmpeg(){
       --cross-prefix=$cross_prefix
     "
   fi
+  echo $build_opt
   echo configuring...
   PKG_CONFIG_PATH="$work_dir/ffmpeg_build/lib/pkgconfig" \
   CFLAGS="-I$work_dir/ffmpeg_build/include" \
@@ -323,7 +308,7 @@ for opt do
       ;;
     --libdav1d)
       echo "dav1d enabled."
-      build_opt+==" --enable-libdav1d"
+      build_opt+=" --enable-libdav1d"
       decoders+=",libdav1d"
       enable_dav1d=1
       ;;
@@ -341,7 +326,8 @@ for opt do
       ;;
     --sys-libvmaf)
       echo "vmaf enabled."
-      build_opt+=" --enable-libvmaf"
+      build_opt+=" --enable-libvmaf --enable-version3"
+      filters+=",libvmaf"
       ;;
     --sys-libopus)
       echo "opus enabled."
