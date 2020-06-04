@@ -143,6 +143,7 @@ build_x265(){
       ln -sf libx265.a ../libx265_main10.a
       cmake_command+="-DEXTRA_LIB=x265_main10.a"
       cmake_command+="-DEXTRA_LINK_FLAGS=-L. -DLINKED_10BIT=1"
+      cd ..
     fi
     cmake -G "Unix Makefiles" $cmake_command .. || exit 1
     make_install
@@ -166,11 +167,9 @@ build_dav1d(){
   mkdir -p $work_dir/ffmpeg_build/lib/pkgconfig
 
   cd $work_dir/ffmpeg_sources
-  if [ ! -f "dav1d-0.7.0.tar.gz" ]; then
   wget -c -O dav1d-0.7.0.tar.gz \
     "https://github.com/videolan/dav1d/archive/0.7.0.tar.gz" \
     || exit 1
-  fi
   if [ ! -n "$dav1d_dir" ]; then
     tar -xzf dav1d-0.7.0.tar.gz || exit 1
     echo "Unpacked dav1d library."
