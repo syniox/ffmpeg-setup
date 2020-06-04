@@ -4,7 +4,7 @@ includedir=${prefix}/include
 
 Name:dav1d 
 Description: dav1d
-Version: 0.5.2
-Libs: -L${libdir} -ldav1d -lpthread
+Version: 0.7.0
+Libs: -L${libdir} -ldav1d -lpthread -ldl
 Libs.private: 
 Cflags: -I${includedir}

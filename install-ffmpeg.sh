@@ -9,7 +9,7 @@ cross_prefix=x86_64-w64-mingw32-
 cross_root=/usr/x86_64-w64-mingw32
 c_compiler=${cross_prefix}gcc
 cxx_compiler=${cross_prefix}g++
-filters=aresample,resize,psnr,ssim,scale
+filters=aresample,hqdn3d,nlmeans,psnr,resize,scale,ssim
 decoders=aac,flac,h264,hevc,mjpeg,mp3,opus,png,rawvideo,vp9,yuv4
 encoders=aac,mjpeg,rawvideo,wrapped_avframe,pcm_s16le
 
@@ -32,7 +32,7 @@ build_opt="
   --disable-filters
   --disable-bsfs
   --disable-muxers
-  --enable-muxer=flac,ico,matroska,mjpeg,mp3,mp4,null,rawvideo,wav,yuv4mpegpipe
+  --enable-muxer=flac,ico,matroska,mjpeg,mp3,mp4,null,rawvideo,segment,wav,yuv4mpegpipe
   --enable-gpl
   --disable-decoders
   --disable-encoders
@@ -66,17 +66,17 @@ generic_configure(){
 
 download_ffmpeg(){
   cd $work_dir
-  if [ ! -f "n4.2.2.tar.gz" ]; then
-    echo "Downloading FFmpeg 4.2.2"
+  if [ ! -f "n4.2.3.tar.gz" ]; then
+    echo "Downloading FFmpeg 4.2.3"
     wget -c \
-      "https://github.com/FFmpeg/FFmpeg/archive/n4.2.2.tar.gz" \
+      "https://github.com/FFmpeg/FFmpeg/archive/n4.2.3.tar.gz" \
       || exit 1
-    echo "Downloaded FFmpeg 4.2.2"
+    echo "Downloaded FFmpeg 4.2.3"
   fi
   if [ -n "$ffmpeg_dir" ]; then
     echo "FFmpeg exists."
   else
-    tar -xzf n4.2.2.tar.gz || exit 1
+    tar -xzf n4.2.3.tar.gz || exit 1
     echo "Unpacked FFmpeg."
     ffmpeg_dir=$( ls -l | grep '^d' | grep FF | awk '{ print $9 }' )
   fi
@@ -119,7 +119,7 @@ build_x265(){
     "http://ftp.videolan.org/videolan/x265/x265_3.2.1.tar.gz" \
     || exit 1
   if [ ! -n "$x265_dir" ]; then
-    tar -xzf x265_3.0.tar.gz || exit 1
+    tar -xzf x265_3.2.1.tar.gz || exit 1
     x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
   fi
 
@@ -132,10 +132,31 @@ build_x265(){
       -DENABLE_SHARED=0
     "
     if [ $cross_compile == 1 ]; then
-      cmake_command="$cmake_command $cmake_cross_command"
+      cmake_command+="$cmake_cross_command"
+    fi
+    echo 10bit: $enable_x265_10b
+    if [ $enable_x265_10b == 1 ]; then
+      mkdir -p 10b && cd 10b
+      cmake ../.. -G "Unix Makefiles" $cmake_command \
+        -DHIGH_BIT_DEPTH=1 -DENABLE_CLI=0 -DEXPORT_C_API=0 || exit 1
+      make -j${threads} || exit 1
+      ln -sf libx265.a ../libx265_main10.a
+      cmake_command+="-DEXTRA_LIB=x265_main10.a"
+      cmake_command+="-DEXTRA_LINK_FLAGS=-L. -DLINKED_10BIT=1"
     fi
     cmake -G "Unix Makefiles" $cmake_command .. || exit 1
     make_install
+    if [ $enable_x265_10b == 1 ]; then
+      mv libx265.a libx265_main.a
+      ar -M << EOF
+      CREATE libx265.a
+      ADDLIB libx265_main.a
+      ADDLIB libx265_main10.a
+      SAVE
+      END
+EOF
+      cp libx265.a $work_dir/ffmpeg_build/lib
+    fi
   fi
 }
 
@@ -145,11 +166,13 @@ build_dav1d(){
   mkdir -p $work_dir/ffmpeg_build/lib/pkgconfig
 
   cd $work_dir/ffmpeg_sources
-  wget -c -O dav1d-0.5.2.tar.gz \
-    "https://github.com/videolan/dav1d/archive/0.5.2.tar.gz" \
+  if [ ! -f "dav1d-0.7.0.tar.gz" ]; then
+  wget -c -O dav1d-0.7.0.tar.gz \
+    "https://github.com/videolan/dav1d/archive/0.7.0.tar.gz" \
     || exit 1
+  fi
   if [ ! -n "$dav1d_dir" ]; then
-    tar -xzf dav1d-0.5.2.tar.gz || exit 1
+    tar -xzf dav1d-0.7.0.tar.gz || exit 1
     echo "Unpacked dav1d library."
     dav1d_dir=$( ls -l | grep '^d' | grep dav1d | awk '{ print $9 }' )
   fi
@@ -157,7 +180,7 @@ build_dav1d(){
   cd $dav1d_dir
   if [ ! -f build/src/libdav1d.a ]; then
     meson build -Ddefault_library=static \
-      -Denable_tests=false || exit 1
+      -Denable_tests=false -Denable_avx512=false || exit 1
     ninja -C build || exit 1
   fi
   cp build/src/libdav1d.a $work_dir/ffmpeg_build/lib || exit 1
@@ -205,7 +228,7 @@ build_fdkaac(){
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/fdk-aac.pc" ]; then
     cd $work_dir/ffmpeg_sources/$fdkaac_dir
     autoreconf -fi 
-	generic_configure || exit 1
+    generic_configure || exit 1
     make_install
   fi
 }
@@ -213,7 +236,7 @@ build_fdkaac(){
 build_vmaf(){
   cd $work_dir/ffmpeg_sources
   wget -c -O vmaf-1.3.15.tar.gz \
-    https://github.com/Netflix/vmaf/archive/v1.3.15.tar.gz \
+    "https://github.com/Netflix/vmaf/archive/v1.3.15.tar.gz" \
     || exit 1
 
   if [ ! -n $vmaf_dif ]; then
@@ -273,6 +296,7 @@ Help:
   --cross-compile      cross compile ffmpeg for windows (default:native)
   --libx264            include x264 library (default disabled)
   --libx265            include x265 library (default disabled)
+  --libx265-10b        include x265 10bit library (default disabled)
   --libdav1d           include dav1d library (default disabled)
   --libmp3lame         include mp3lame library (default disabled)
   --libfdk-aac         include fdkaac library (default disabled)
@@ -296,32 +320,26 @@ for opt do
       ;;
     --libx264)
       echo "x264 enabled."
-      build_opt+=" --enable-libx264"
-      encoders+=",libx264"
       enable_x264=1
       ;;
     --libx265)
       echo "x265 enabled."
-      build_opt+=" --enable-libx265"
-      encoders+=",libx265"
       enable_x265=1
+      ;;
+    --libx265-10b)
+      echo "x265 10bit enabled."
+      enable_x265_10b=1
       ;;
     --libdav1d)
       echo "dav1d enabled."
-      build_opt+=" --enable-libdav1d"
-      decoders+=",libdav1d"
       enable_dav1d=1
       ;;
     --libfdk-aac)
       echo "fdkaac enabled."
-      build_opt+=" --enable-libfdk-aac --enable-nonfree "
-      encoders+=",libfdk_aac"
       enable_fdkaac=1
       ;;
     --libmp3lame)
       echo "mp3lame enabled."
-      build_opt+=" --enable-libmp3lame"
-      encoders+=",libmp3lame"
       enable_mp3lame=1
       ;;
     --sys-libvmaf)
@@ -349,18 +367,28 @@ download_ffmpeg || exit 1
 echo "configuring dependencies..."
 
 if [[ $enable_x264 == 1 ]]; then
+  build_opt+=" --enable-libx264"
+  encoders+=",libx264"
   build_x264 || exit 1
 fi
-if [[ $enable_x265 == 1 ]]; then
+if [[ $enable_x265 == 1 || $enable_x265_10b == 1 ]]; then
+  build_opt+=" --enable-libx265"
+  encoders+=",libx265"
   build_x265 || exit 1
 fi
 if [[ $enable_dav1d == 1 ]]; then
+  build_opt+=" --enable-libdav1d"
+  decoders+=",libdav1d"
   build_dav1d || exit 1
 fi
 if [[ $enable_mp3lame == 1 ]]; then
+  build_opt+=" --enable-libmp3lame"
+  encoders+=",libmp3lame"
   build_lame || exit 1
 fi
 if [[ $enable_fdkaac == 1 ]]; then
+  build_opt+=" --enable-libfdk-aac --enable-nonfree "
+  encoders+=",libfdk_aac"
   build_fdkaac || exit 1
 fi
 
