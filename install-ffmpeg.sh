@@ -66,19 +66,14 @@ generic_configure(){
 
 download_ffmpeg(){
   cd $work_dir
-  if [ ! -f "n4.2.3.tar.gz" ]; then
-    echo "Downloading FFmpeg 4.2.3"
-    wget -c \
-      "https://github.com/FFmpeg/FFmpeg/archive/n4.2.3.tar.gz" \
-      || exit 1
-    echo "Downloaded FFmpeg 4.2.3"
-  fi
-  if [ -n "$ffmpeg_dir" ]; then
-    echo "FFmpeg exists."
-  else
-    tar -xzf n4.2.3.tar.gz || exit 1
-    echo "Unpacked FFmpeg."
+  if [ ! -n "$ffmpeg_dir" ]; then
+    local address="https://github.com/FFmpeg/FFmpeg"
+    if [ $mirror == 1 ]; then
+      address="https://gitee.com/rzkn/ffmpeg"
+    fi
+    git clone $address FFmpeg-n4.2 -b release/4.2 --depth=200 || exit 1
     ffmpeg_dir=$( ls -l | grep '^d' | grep FF | awk '{ print $9 }' )
+    cd FFmpeg-n4.2 && git checkout n4.2.3
   fi
 }
 
@@ -125,25 +120,27 @@ build_x265(){
 
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x265.pc" ]; then
     cd $work_dir/ffmpeg_sources/$x265_dir/source
-    rm -rf build && mkdir build && cd build
+    mkdir -p build && cd build
     local cmake_command="
       -DCMAKE_INSTALL_PREFIX=/
       -DCMAKE_MAKE_PROGRAM=$make_program
       -DENABLE_SHARED=0
     "
     if [ $cross_compile == 1 ]; then
-      cmake_command+="$cmake_cross_command"
+      cmake_command+=" $cmake_cross_command"
     fi
     echo 10bit: $enable_x265_10b
     if [ $enable_x265_10b == 1 ]; then
       mkdir -p 10b && cd 10b
-      cmake ../.. -G "Unix Makefiles" $cmake_command \
-        -DHIGH_BIT_DEPTH=1 -DENABLE_CLI=0 -DEXPORT_C_API=0 || exit 1
+      if [ ! -f "Makefile" ]; then
+        cmake ../.. -G "Unix Makefiles" $cmake_command \
+          -DHIGH_BIT_DEPTH=1 -DENABLE_CLI=0 -DEXPORT_C_API=0 || exit 1
+      fi
       make -j${threads} || exit 1
-      ln -sf libx265.a ../libx265_main10.a
-      cmake_command+="-DEXTRA_LIB=x265_main10.a"
-      cmake_command+="-DEXTRA_LINK_FLAGS=-L. -DLINKED_10BIT=1"
       cd ..
+      ln -sf 10b/libx265.a libx265_main10.a
+      cmake_command+=" -DEXTRA_LIB=x265_main10.a"
+      cmake_command+=" -DEXTRA_LINK_FLAGS=-L. -DLINKED_10BIT=1"
     fi
     cmake -G "Unix Makefiles" $cmake_command .. || exit 1
     make_install
@@ -292,6 +289,7 @@ Help:
   -h, --help           print this message
   -t=<int>(default:2)  set the number of threads in compilation
   -x                   build static library (default: shared)
+  --mirror             download ffmpeg behind The Great FireWall
   --cross-compile      cross compile ffmpeg for windows (default:native)
   --libx264            include x264 library (default disabled)
   --libx265            include x265 library (default disabled)
@@ -313,6 +311,9 @@ for opt do
       ;;
     -x)
       static_lib=1
+      ;;
+    --mirror)
+      mirror=1
       ;;
     --cross-compile)
       cross_compile=1
