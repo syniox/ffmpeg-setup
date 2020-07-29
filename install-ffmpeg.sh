@@ -9,9 +9,8 @@ cross_prefix=x86_64-w64-mingw32-
 cross_root=/usr/x86_64-w64-mingw32
 c_compiler=${cross_prefix}gcc
 cxx_compiler=${cross_prefix}g++
-filters=aresample,hqdn3d,nlmeans,psnr,resize,scale,ssim
-decoders=aac,flac,h264,hevc,mjpeg,mp3,opus,png,rawvideo,vp9,yuv4
-encoders=aac,mjpeg,rawvideo,wrapped_avframe,pcm_s16le
+decoders=aac,flac,h264,hevc,utvideo,mjpeg,mp3,opus,pcm_s16le,png,rawvideo,ssa,vp9,yuv4
+encoders=aac,flac,utvideo,mjpeg,pcm_s16le,png,rawvideo,ssa,wrapped_avframe
 
 cd $work_dir && mkdir -p ffmpeg_sources
 ffmpeg_dir=$( ls -l | grep '^d' | grep FF | awk '{ print $9 }' )
@@ -26,13 +25,8 @@ fdkaac_dir=$( ls -l | grep '^d' | grep fdk | awk '{ print $9 }' )
 
 build_opt="
   --prefix=/
-  --pkg-config-flags=--static
   --disable-debug
   --disable-hwaccels
-  --disable-filters
-  --disable-bsfs
-  --disable-muxers
-  --enable-muxer=flac,ico,matroska,mjpeg,mp3,mp4,null,rawvideo,segment,wav,yuv4mpegpipe
   --enable-gpl
   --disable-decoders
   --disable-encoders
@@ -110,13 +104,9 @@ build_x264(){
 build_x265(){
   cd $work_dir/ffmpeg_sources
 
-  wget -c \
-    "http://ftp.videolan.org/videolan/x265/x265_3.2.1.tar.gz" \
-    || exit 1
-  if [ ! -n "$x265_dir" ]; then
-    tar -xzf x265_3.2.1.tar.gz || exit 1
-    x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
-  fi
+  git clone https://bitbucket.org/multicoreware/x265_git --depth=10
+  x265_dir=$( ls -l | grep '^d' | grep x265 | awk '{ print $9 }' )
+  cd x265_git && git checkout 3.4
 
   if [ ! -f "$work_dir/ffmpeg_build/lib/pkgconfig/x265.pc" ]; then
     cd $work_dir/ffmpeg_sources/$x265_dir/source
@@ -164,9 +154,11 @@ build_dav1d(){
   mkdir -p $work_dir/ffmpeg_build/lib/pkgconfig
 
   cd $work_dir/ffmpeg_sources
-  wget -c -O dav1d-0.7.0.tar.gz \
-    "https://github.com/videolan/dav1d/archive/0.7.0.tar.gz" \
-    || exit 1
+  if [ ! -f "dav1d-0.7.0.tar.gz" ];then
+    wget -c -O dav1d-0.7.0.tar.gz \
+      "https://github.com/videolan/dav1d/archive/0.7.0.tar.gz" \
+      || exit 1
+  fi
   if [ ! -n "$dav1d_dir" ]; then
     tar -xzf dav1d-0.7.0.tar.gz || exit 1
     echo "Unpacked dav1d library."
@@ -176,17 +168,14 @@ build_dav1d(){
   cd $dav1d_dir
   if [ ! -f build/src/libdav1d.a ]; then
     meson build -Ddefault_library=static \
-      -Denable_tests=false -Denable_avx512=false || exit 1
-    ninja -C build || exit 1
+      -Denable_tests=false -Denable_avx512=false \
+      --prefix=$work_dir/ffmpeg_build || exit 1
+    ninja -C build install || exit 1
+    cd $work_dir/ffmpeg_build/lib
+    mv x86_64-linux-gnu/pkgconfig/* pkgconfig
+    cp x86_64-linux-gnu/* .
+    rm -r x86_64-linux-gnu
   fi
-  cp build/src/libdav1d.a $work_dir/ffmpeg_build/lib || exit 1
-  cp -r include/dav1d $work_dir/ffmpeg_build/include || exit 1
-  cp -r build/include/dav1d $work_dir/ffmpeg_build/include || exit 1
-
-  cd $work_dir
-  echo "prefix=$work_dir/ffmpeg_build" > dav1d.pc
-  cat _dav1d.pc >> dav1d.pc
-  mv dav1d.pc $work_dir/ffmpeg_build/lib/pkgconfig
 }
 
 build_lame(){
@@ -255,7 +244,6 @@ build_ffmpeg(){
   else
     build_opt+=" --enable-shared --disable-static"
   fi
-  build_opt+=" --enable-filter=$filters"
   build_opt+=" --enable-decoder=$decoders"
   build_opt+=" --enable-encoder=$encoders"
   if [ $cross_compile == 1 ]; then
@@ -271,7 +259,7 @@ build_ffmpeg(){
   CFLAGS="-I$work_dir/ffmpeg_build/include" \
   LDFLAGS="-L$work_dir/ffmpeg_build/lib" \
   LIBS="-lpthread -lm -lgcc" \
-  bash ./configure $build_opt || exit 1
+  bash ./configure --pkg-config='pkg-config --static' $build_opt || exit 1
   make_install
   if [ $static_lib == 0 ]; then
     cp $work_dir/ffmpeg_build/lib/*.dll $work_dir/ffmpeg_build/bin/
@@ -345,7 +333,6 @@ for opt do
     --sys-libvmaf)
       echo "vmaf enabled."
       build_opt+=" --enable-libvmaf --enable-version3"
-      filters+=",libvmaf"
       ;;
     --sys-libopus)
       echo "opus enabled."
@@ -388,6 +375,7 @@ if [[ $enable_mp3lame == 1 ]]; then
 fi
 if [[ $enable_fdkaac == 1 ]]; then
   build_opt+=" --enable-libfdk-aac --enable-nonfree "
+  decoders+=",libfdk_aac"
   encoders+=",libfdk_aac"
   build_fdkaac || exit 1
 fi

@@ -28,4 +28,4 @@ ffplay needs `libsdl2-dev`
 
 ### Known Issues
 
-* cannot cross-compile libx265
+- [x] cannot cross-compile libx265
