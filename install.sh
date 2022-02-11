@@ -1,7 +1,7 @@
 #!/bin/bash
 
 alllibs="x264 x265 dav1d fdk-aac"
-work_dir="($(cd $(dirname $0); pwd)"
+work_dir="$(cd $(dirname $0); pwd)"
 threads=2
 # TODO: add static library support
 
@@ -20,9 +20,12 @@ for opt do
             ask_help=1;;
         --help)
             ask_help=1;;
+        *)
+            echo [Warning] Unused option: $opt;;
     esac
 done
 
+# Help processing
 if [[ $ask_help == 1 ]]; then
     cat<<EOF
 Usage: $0 [options]
@@ -37,7 +40,14 @@ EOF
 exit 0
 fi
 
-echo exlibs: $exlibs
+# Ensure libraries
+echo [Info] exlibs: $exlibs
 for exlib in $exlibs; do
-    echo exlib: $exlib
+    if [[ -z "$( ls plugins/$exlib.sh 2>/dev/null)" ]]; then
+        invld_lib+=" $exlib"
+    fi
 done
+if [[ -n "$invld_lib" ]]; then
+    echo [Error] Invalid library finded: $invld_lib
+    exit 1
+fi
